@@ -1,9 +1,12 @@
 -- Localization.lua
 TA_STRINGS = {
-    LOADED = "TankAudit Loaded. Type /ta config to open settings.",
+    -- The %s will be replaced by the version number
+    LOADED = "|cFF00FF00[TankAudit]|r v%s active. Type /taudit to open settings.",
+    
     MISSING_HEADER = "Missing Buffs:",
     EXPIRING_HEADER = "Expiring Soon:",
-    -- Class Specific Names (Important for 1.12 Locale independence if we expand later)
+    
+    -- Class Names
     WARRIOR = "Warrior",
     DRUID = "Druid",
     PALADIN = "Paladin",

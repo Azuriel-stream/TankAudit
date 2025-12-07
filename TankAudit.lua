@@ -11,7 +11,7 @@ local SCAN_INTERVAL = 15     -- 15 seconds for Buffs
 local timeSinceLastHS = 0
 local HS_INTERVAL = 60       -- 60 seconds for Healthstones
 
--- 2. Slash Command Registration (Must run for everyone to handle the command)
+-- 2. Slash Command Registration
 SLASH_TANKAUDIT1 = "/taudit"
 SlashCmdList["TANKAUDIT"] = function(msg)
     TankAudit_SlashHandler(msg)
@@ -30,21 +30,19 @@ function TankAudit_OnLoad()
         TA_IS_TANK = false
     end
 
-    -- If NOT a tank, we stop here. We do NOT register events.
+    -- If NOT a tank, stop here.
     if not TA_IS_TANK then
-        -- Optional: You can print a message here, or stay silent until they type /taudit
         return 
     end
 
-    -- If we are a tank, proceed with full registration
+    -- Register Events
     this:RegisterEvent("PLAYER_ENTERING_WORLD")
-    this:RegisterEvent("PLAYER_REGEN_DISABLED") -- Enter Combat
-    this:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Leave Combat
+    this:RegisterEvent("PLAYER_REGEN_DISABLED")
+    this:RegisterEvent("PLAYER_REGEN_ENABLED")
     
-    -- Note: We do not need to register "OnUpdate" here because it is defined in the XML.
-    -- However, the OnUpdate function has a guard clause at the top to prevent CPU usage for non-tanks.
-
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00TankAudit|r " .. TA_VERSION .. " Loaded. Type /taudit for options.")
+    -- Print Loaded Message
+    -- Formats the string: "[TankAudit] v1.0.0 active. Type /taudit to open settings."
+    DEFAULT_CHAT_FRAME:AddMessage(string.format(TA_STRINGS.LOADED, TA_VERSION))
 end
 
 -- 4. Slash Command Handler
@@ -54,12 +52,9 @@ function TankAudit_SlashHandler(msg)
         return
     end
 
-    -- If tank, open config (Logic to be added later)
     if msg == "config" or msg == "" then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00TankAudit:|r Opening Configuration... (Feature coming soon)")
-        -- TankAudit_OpenConfig() -- Future function
+        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[TankAudit]|r Configuration coming soon.")
     elseif msg == "test" then
-        -- Useful for debugging later
         TankAudit_RunBuffScan()
     else
         DEFAULT_CHAT_FRAME:AddMessage("TankAudit usage: /taudit config")
@@ -68,27 +63,21 @@ end
 
 -- 5. Event Handling
 function TankAudit_OnEvent(event)
-    -- Double check safety, though non-tanks shouldn't receive these events anyway
     if not TA_IS_TANK then return end
 
     if event == "PLAYER_ENTERING_WORLD" then
-        -- Load SavedVariables or defaults
         TankAudit_InitializeDefaults()
     elseif event == "PLAYER_REGEN_DISABLED" then
-        -- ENTER COMBAT
         TankAudit_SetCombatState(true)
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- LEAVE COMBAT
         TankAudit_SetCombatState(false)
     end
 end
 
 -- 6. The Timer Loop (OnUpdate)
 function TankAudit_OnUpdate(elapsed)
-    -- CRITICAL OPTIMIZATION:
-    -- If not a tank, return immediately. This creates a near-zero footprint.
     if not TA_IS_TANK then 
-        this:SetScript("OnUpdate", nil) -- Permanently disable OnUpdate for this session to save max CPU
+        this:SetScript("OnUpdate", nil) 
         return 
     end
 
@@ -113,12 +102,7 @@ function TankAudit_InitializeDefaults()
 end
 
 function TankAudit_SetCombatState(inCombat)
-    if inCombat then
-        -- Hide Request Bar?
-        -- Enable Critical Alert Frame?
-    else
-        -- Show Request Bar?
-    end
+    -- Combat toggle logic
 end
 
 function TankAudit_RunBuffScan()
