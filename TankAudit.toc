@@ -8,5 +8,5 @@
 
 Localization.lua
 Data.lua
-TankAudit.xml
 TankAudit.lua
+TankAudit.xml
