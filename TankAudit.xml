@@ -1,0 +1,48 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+
+    <Frame name="TankAudit_Engine">
+        <Scripts>
+            <OnLoad>
+                TankAudit_OnLoad();
+            </OnLoad>
+            <OnEvent>
+                TankAudit_OnEvent(event);
+            </OnEvent>
+            <OnUpdate>
+                TankAudit_OnUpdate(arg1);
+            </OnUpdate>
+        </Scripts>
+    </Frame>
+
+    <Button name="TankAudit_RequestBtnTemplate" virtual="true" hidden="true">
+        <Size>
+            <AbsDimension x="32" y="32"/>
+        </Size>
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture name="$parentIcon" setAllPoints="true"/>
+            </Layer>
+            <Layer level="OVERLAY">
+                <FontString name="$parentText" inherits="GameFontNormalSmall" text="">
+                    <Anchors>
+                        <Anchor point="BOTTOM" relativePoint="BOTTOM" x="0" y="2"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        <Scripts>
+            <OnClick>
+                TankAudit_RequestButton_OnClick(this);
+            </OnClick>
+            <OnEnter>
+                GameTooltip:SetOwner(this, "ANCHOR_RIGHT");
+                GameTooltip:SetText(this.tooltipText, 1, 1, 1);
+                GameTooltip:Show();
+            </OnEnter>
+            <OnLeave>
+                GameTooltip:Hide();
+            </OnLeave>
+        </Scripts>
+    </Button>
+</Ui>

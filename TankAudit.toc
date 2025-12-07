@@ -1,0 +1,11 @@
+## Interface: 11200
+## Title: TankAudit
+## Notes: Smart buff, debuff, and consumable monitor for Tanks (Warrior, Druid, Paladin, Shaman).
+## Author: YourName
+## Version: 1.0.0
+## SavedVariables: TankAuditDB
+## SavedVariablesPerCharacter: TankAuditCharDB
+
+Localization.lua
+TankAudit.xml
+TankAudit.lua
