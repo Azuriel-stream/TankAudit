@@ -55,8 +55,8 @@ TA_DATA = {
     -- 2. CONSUMABLES
     CONSUMABLES = {
         FOOD = { ["Well Fed"] = { "Spell_Misc_Food" } },
-        -- Added Healthstone Icon for the button
-        HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, -- Generic healthstone icon
+        -- Ensure this key matches exactly what we search for
+        HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, 
         FLASKS = {
             ["Flask"] = { "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" }
         }

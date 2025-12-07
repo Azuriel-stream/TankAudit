@@ -17,9 +17,9 @@ local TA_FRAME_ANCHOR = "CENTER" -- Default position
 
 -- Timers
 local timeSinceLastScan = 0
-local SCAN_INTERVAL = 15     -- 15 seconds for Buffs
+local SCAN_INTERVAL = 6      -- UPDATED: Faster checks (was 15)
 local timeSinceLastHS = 0
-local HS_INTERVAL = 60       -- 60 seconds for Healthstones
+local HS_INTERVAL = 60       -- Keep Healthstone at 60s
 
 -- 2. Slash Command Registration
 SLASH_TANKAUDIT1 = "/taudit"
@@ -209,12 +209,33 @@ function TankAudit_CheckHealthstone()
     return false -- Missing
 end
 
+-- Helper: Check Weapon Enchants (Stones/Oils)
+function TankAudit_CheckWeapon()
+    -- GetWeaponEnchantInfo returns: hasMainHand, mainHandTime, mainHandCharges...
+    local hasMainHand, _, _, _, _, _ = GetWeaponEnchantInfo()
+    if not hasMainHand then
+        return false -- Missing
+    end
+    return true -- Found
+end
+
 -- D. MAIN SCAN ROUTINE
 function TankAudit_RunBuffScan()
     TankAudit_UpdateRoster()
 
     TA_MISSING_BUFFS = {}
     TA_EXPIRING_BUFFS = {}
+
+    -- RULE 1: SOLO & OUT OF COMBAT -> SILENCE
+    -- If not in a group (party or raid) AND not in combat, show nothing.
+    local isSolo = (GetNumPartyMembers() == 0 and GetNumRaidMembers() == 0)
+    local inCombat = UnitAffectingCombat("player") -- Returns 1/true if in combat
+    
+    if isSolo and not inCombat then
+        -- Clear UI and Stop
+        TankAudit_UpdateUI() 
+        return
+    end
 
     -- 1. Self Buffs (Warn at 30s)
     local selfBuffs = TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF
@@ -263,16 +284,21 @@ function TankAudit_RunBuffScan()
         end
     end
 
-    -- 3. Consumables
-    if not TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"]) then
-        table.insert(TA_MISSING_BUFFS, "Well Fed")
-    end
-    
-    if TA_PLAYER_CLASS ~= "DRUID" then 
-        if not TankAudit_CheckWeapon() then table.insert(TA_MISSING_BUFFS, "Weapon Buff") end
+    -- 3. Consumables (Suppressed if Solo + Combat)
+    -- If we are Solo AND In Combat, we skip these checks
+    local suppressConsumables = (isSolo and inCombat)
+
+    if not suppressConsumables then
+        if not TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"]) then
+            table.insert(TA_MISSING_BUFFS, "Well Fed")
+        end
+        
+        if TA_PLAYER_CLASS ~= "DRUID" then 
+            if not TankAudit_CheckWeapon() then table.insert(TA_MISSING_BUFFS, "Weapon Buff") end
+        end
     end
 
-    -- 4. Healthstone
+    -- 4. Healthstone (Always check if Warlock present, suppressed if solo anyway since no Warlock)
     if not TankAudit_CheckHealthstone() then
         table.insert(TA_MISSING_BUFFS, "Healthstone")
     end
@@ -333,14 +359,24 @@ function TankAudit_UpdateUI()
 end
 
 function TankAudit_GetIconForName(buffName)
-    -- Lookups
+    -- 1. Check Class Buffs
     for class, data in pairs(TA_DATA.CLASSES) do
         if data.SELF and data.SELF[buffName] then return "Interface\\Icons\\" .. data.SELF[buffName][1] end
         if data.GROUP and data.GROUP[buffName] then return "Interface\\Icons\\" .. data.GROUP[buffName][1] end
     end
+    
+    -- 2. Check Consumables
     if TA_DATA.CONSUMABLES.FOOD[buffName] then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.FOOD[buffName][1] end
-    if buffName == "Healthstone" then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.HEALTHSTONE["Healthstone"][1] end
+    
+    -- 3. Healthstone (Specific Check)
+    if buffName == "Healthstone" then 
+        -- Hardcoded fallback if the table lookup fails for any reason
+        return "Interface\\Icons\\INV_Stone_04" 
+    end
+    
+    -- 4. Weapon
     if buffName == "Weapon Buff" then return "Interface\\Icons\\INV_Stone_SharpeningStone_01" end
+
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
