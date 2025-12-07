@@ -7,5 +7,6 @@
 ## SavedVariablesPerCharacter: TankAuditCharDB
 
 Localization.lua
+Data.lua
 TankAudit.xml
 TankAudit.lua
