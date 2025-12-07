@@ -1,14 +1,9 @@
 -- Data.lua
 TA_DATA = {
     -- 1. CLASS BUFFS
-    -- Format: ["Readable Name"] = { "Icon_1", "Icon_2" }
-    -- If ANY icon in the list is found, the buff is considered active.
-    
     CLASSES = {
         WARRIOR = {
-            SELF = {
-                ["Battle Shout"] = { "Ability_Warrior_BattleShout" }
-            },
+            SELF = { ["Battle Shout"] = { "Ability_Warrior_BattleShout" } },
             GROUP = {}
         },
         DRUID = {
@@ -18,7 +13,7 @@ TA_DATA = {
                 ["Bear Form"] = { "Ability_Racial_BearForm" }
             },
             GROUP = {
-                ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration" } -- GOTW and MOTW share icon
+                ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration" }
             }
         },
         PALADIN = {
@@ -27,26 +22,22 @@ TA_DATA = {
                 ["Holy Shield"] = { "Spell_Holy_BlessingOfProtection" } 
             },
             GROUP = {
-                -- We will treat Blessings as a special category in the main loop later, 
-                -- but for now, generic mapping:
                 ["Blessing of Kings"] = { "Spell_Magic_MageArmor", "Spell_Magic_GreaterBlessingofKings" },
-                ["Blessing of Might"] = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofKings" }, -- Check icons later
-                ["Blessing of Sanctuary"] = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary" }
+                ["Blessing of Might"] = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofKings" },
+                ["Blessing of Light"] = { "Spell_Holy_PrayerOfHealing02" },
+                ["Blessing of Sanctuary"] = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary" },
+                ["Blessing of Salvation"] = { "Spell_Holy_SealOfSalvation" } -- Included for completeness
             }
         },
         SHAMAN = {
-            SELF = {
-                ["Lightning Shield"] = { "Spell_Nature_LightningShield" }
-            },
-            GROUP = {
-                -- Totems are usually auras, tricky to track via UnitBuff, leaving empty for now
-            }
+            SELF = { ["Lightning Shield"] = { "Spell_Nature_LightningShield" } },
+            GROUP = {}
         },
         PRIEST = {
             GROUP = {
-                -- Combining Single and Group buffs into one check
-                ["Power Word: Fortitude"] = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude" },
-                ["Divine Spirit"] = { "Spell_Holy_DivineSpirit", "Spell_Holy_PrayerOfSpirit" }
+                -- FIXED: Lowercase "of" in PrayerofSpirit based on your debug
+                ["Divine Spirit"] = { "Spell_Holy_DivineSpirit", "Spell_Holy_PrayerofSpirit" },
+                ["Power Word: Fortitude"] = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude" }
             }
         },
         MAGE = {
@@ -63,16 +54,11 @@ TA_DATA = {
 
     -- 2. CONSUMABLES
     CONSUMABLES = {
-        FOOD = {
-            ["Well Fed"] = { "Spell_Misc_Food" }
-        },
+        FOOD = { ["Well Fed"] = { "Spell_Misc_Food" } },
+        -- Added Healthstone Icon for the button
+        HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, -- Generic healthstone icon
         FLASKS = {
-            ["Flask"] = { 
-                "INV_Potion_62", -- Titans
-                "INV_Potion_97", -- Wisdom
-                "INV_Potion_41", -- Supreme Power
-                "INV_Potion_48"  -- Chromatic
-            }
+            ["Flask"] = { "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" }
         }
     }
 }

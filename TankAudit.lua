@@ -61,16 +61,16 @@ end
 -- 4. Slash Command Handler
 function TankAudit_SlashHandler(msg)
     if not TA_IS_TANK then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000TankAudit:|r Addon disabled. Your class (" .. (TA_PLAYER_CLASS or "Unknown") .. ") is not supported.")
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000TankAudit:|r Disabled for non-tanks.")
         return
     end
 
-    if msg == "config" or msg == "" then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[TankAudit]|r Configuration coming soon.")
+    if msg == "debug" then
+        TankAudit_DebugBuffs()
     elseif msg == "test" then
         TankAudit_RunBuffScan()
     else
-        DEFAULT_CHAT_FRAME:AddMessage("TankAudit usage: /taudit config")
+        DEFAULT_CHAT_FRAME:AddMessage("TankAudit: Type /taudit debug to list current buff paths.")
     end
 end
 
@@ -109,53 +109,83 @@ function TankAudit_OnUpdate(elapsed)
     end
 end
 
--- 7. Logic Core
+-- =============================================================
+-- 7. LOGIC CORE
+-- =============================================================
 
--- Helper: Check who is in the party/raid so we know what buffs to expect
+-- State Variables
+local TA_ROSTER_INFO = {
+    CLASSES = {},              -- Count: ["PALADIN"] = 2
+    HAS_GROUP_WARLOCK = false, -- Is there a warlock in MY subgroup?
+    MY_SUBGROUP = 1
+}
+
+-- A. Roster Analysis (Subgroups & Counts)
 function TankAudit_UpdateRoster()
-    TA_ROSTER_CLASSES = {} -- Reset
+    TA_ROSTER_INFO.CLASSES = {}
+    TA_ROSTER_INFO.HAS_GROUP_WARLOCK = false
     
-    -- If not in group, we only care about ourselves
-    if GetNumPartyMembers() == 0 and GetNumRaidMembers() == 0 then
-        TA_ROSTER_CLASSES[TA_PLAYER_CLASS] = true
+    local numRaid = GetNumRaidMembers()
+    local numParty = GetNumPartyMembers()
+    
+    -- Case 1: Solo
+    if numRaid == 0 and numParty == 0 then
+        TA_ROSTER_INFO.CLASSES[TA_PLAYER_CLASS] = 1
         return
     end
 
-    -- Scan Party/Raid
-    local numMembers = GetNumRaidMembers()
-    local prefix = "raid"
-    if numMembers == 0 then
-        numMembers = GetNumPartyMembers()
-        prefix = "party"
-        -- Don't forget player in a 5-man group (party1..4 doesn't include player)
-        TA_ROSTER_CLASSES[TA_PLAYER_CLASS] = true
+    -- Case 2: Raid
+    if numRaid > 0 then
+        -- 1. Find my subgroup
+        for i = 1, numRaid do
+            local name, _, subgroup = GetRaidRosterInfo(i)
+            if name == UnitName("player") then
+                TA_ROSTER_INFO.MY_SUBGROUP = subgroup
+                break
+            end
+        end
+        -- 2. Scan roster
+        for i = 1, numRaid do
+            local _, _, subgroup, _, _, class, _, online = GetRaidRosterInfo(i)
+            if online then
+                TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
+                if class == "WARLOCK" and subgroup == TA_ROSTER_INFO.MY_SUBGROUP then
+                    TA_ROSTER_INFO.HAS_GROUP_WARLOCK = true
+                end
+            end
+        end
+        return
     end
 
-    for i = 1, numMembers do
-        local unit = prefix .. i
+    -- Case 3: Party
+    TA_ROSTER_INFO.CLASSES[TA_PLAYER_CLASS] = 1
+    for i = 1, numParty do
+        local unit = "party"..i
         local _, class = UnitClass(unit)
-        if class then
-            TA_ROSTER_CLASSES[class] = true
+        if class and UnitIsConnected(unit) then
+            TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
+            if class == "WARLOCK" then
+                TA_ROSTER_INFO.HAS_GROUP_WARLOCK = true -- In 5-man, everyone is same group
+            end
         end
     end
 end
 
--- Helper: Check if player has ANY icon from a provided list
--- Returns: boolean (found), number (time left in seconds)
+-- B. Buff Scanner (Uses Internal Index for Accuracy)
 function TankAudit_GetBuffStatus(iconList)
-    -- We scan through all buffs on the player ONCE to be efficient
-    local i = 1
-    while true do
-        local icon, stacks = UnitBuff("player", i)
-        if not icon then break end -- End of buffs
-
-        -- Compare this buff icon against our list of valid icons
-        for _, validIcon in pairs(iconList) do
-            if string.find(icon, validIcon) then
-                -- Found a match!
-                local buffIndex = GetPlayerBuff(i - 1, "HELPFUL")
-                local timeLeft = GetPlayerBuffTimeLeft(buffIndex)
-                return true, timeLeft
+    local i = 0
+    while i < 32 do
+        local buffIndex = GetPlayerBuff(i, "HELPFUL")
+        if buffIndex < 0 then break end
+        
+        local texture = GetPlayerBuffTexture(buffIndex)
+        if texture then
+            for _, validIcon in pairs(iconList) do
+                -- Case-insensitive check just to be safe
+                if string.find(string.lower(texture), string.lower(validIcon)) then
+                    local timeLeft = GetPlayerBuffTimeLeft(buffIndex)
+                    return true, timeLeft
+                end
             end
         end
         i = i + 1
@@ -163,165 +193,215 @@ function TankAudit_GetBuffStatus(iconList)
     return false, 0
 end
 
--- Helper: Check Weapon Enchants (Stones/Oils)
-function TankAudit_CheckWeapon()
-    -- GetWeaponEnchantInfo returns: hasMainHand, mainHandTime, mainHandCharges, hasOffHand...
-    local hasMainHand, _, _, _, _, _ = GetWeaponEnchantInfo()
-    if not hasMainHand then
-        return false -- Missing
+-- C. Healthstone Scanner (Bag Check)
+function TankAudit_CheckHealthstone()
+    -- Only check if Warlock exists in raid (any group)
+    if (TA_ROSTER_INFO.CLASSES["WARLOCK"] or 0) == 0 then return true end
+    
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots(bag) do
+            local link = GetContainerItemLink(bag, slot)
+            if link and string.find(link, "Healthstone") then
+                return true -- Found one
+            end
+        end
     end
-    return true -- Found
+    return false -- Missing
 end
 
--- Helper to fetch icon texture from Data.lua
-function TankAudit_GetIconForName(buffName)
-    -- 1. Check Class Buffs
-    for class, data in pairs(TA_DATA.CLASSES) do
-        -- Check Self
-        if data.SELF and data.SELF[buffName] then return "Interface\\Icons\\" .. data.SELF[buffName][1] end
-        -- Check Group
-        if data.GROUP and data.GROUP[buffName] then return "Interface\\Icons\\" .. data.GROUP[buffName][1] end
-    end
-    
-    -- 2. Check Consumables
-    if TA_DATA.CONSUMABLES.FOOD[buffName] then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.FOOD[buffName][1] end
-    
-    -- 3. Check Weapon (Hardcoded icon for now)
-    if buffName == "Weapon Buff" then return "Interface\\Icons\\INV_Stone_SharpeningStone_01" end
-
-    return "Interface\\Icons\\INV_Misc_QuestionMark" -- Fallback
-end
-
--- MAIN SCAN FUNCTION
+-- D. MAIN SCAN ROUTINE
 function TankAudit_RunBuffScan()
     TankAudit_UpdateRoster()
 
     TA_MISSING_BUFFS = {}
     TA_EXPIRING_BUFFS = {}
 
-    -- A. Check Self Buffs
+    -- 1. Self Buffs (Warn at 30s)
     local selfBuffs = TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF
     if selfBuffs then
         for name, iconList in pairs(selfBuffs) do
             local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
             if not hasBuff then
                 table.insert(TA_MISSING_BUFFS, name)
+            elseif timeLeft > 0 and timeLeft < 30 then
+                table.insert(TA_EXPIRING_BUFFS, name)
             end
         end
     end
 
-    -- B. Check Group Buffs
+    -- 2. Group Buffs (Smart Filtering)
     for class, data in pairs(TA_DATA.CLASSES) do
-        if TA_ROSTER_CLASSES[class] and data.GROUP then
+        local classCount = TA_ROSTER_INFO.CLASSES[class] or 0
+        
+        if classCount > 0 and data.GROUP then
+            -- Paladin Priority Logic
+            local validPaladinBuffs = {}
+            if class == "PALADIN" then
+                local priority = { "Blessing of Kings", "Blessing of Might", "Blessing of Light", "Blessing of Sanctuary" }
+                for p = 1, classCount do
+                    if priority[p] then validPaladinBuffs[priority[p]] = true end
+                end
+            end
+
             for name, iconList in pairs(data.GROUP) do
-                local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
-                if not hasBuff then
-                    table.insert(TA_MISSING_BUFFS, name)
+                local shouldCheck = true
+                
+                -- Filters
+                if class == "PALADIN" and not validPaladinBuffs[name] then shouldCheck = false end
+                if name == "Blood Pact" and not TA_ROSTER_INFO.HAS_GROUP_WARLOCK then shouldCheck = false end
+                if name == "Arcane Intellect" and TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false end
+
+                if shouldCheck then
+                    local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
+                    if not hasBuff then
+                        table.insert(TA_MISSING_BUFFS, name)
+                    elseif timeLeft > 0 and timeLeft < 120 then
+                        table.insert(TA_EXPIRING_BUFFS, name)
+                    end
                 end
             end
         end
     end
 
-    -- C. Check Consumables (Always check Food + Weapon)
-    -- 1. Food
-    local hasFood = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
-    if not hasFood then
+    -- 3. Consumables
+    if not TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"]) then
         table.insert(TA_MISSING_BUFFS, "Well Fed")
     end
-
-    -- 2. Weapon Enchant (Skip for Druids as they don't use stones in form usually, or check config later)
+    
     if TA_PLAYER_CLASS ~= "DRUID" then 
-        if not TankAudit_CheckWeapon() then
-            table.insert(TA_MISSING_BUFFS, "Weapon Buff")
-        end
+        if not TankAudit_CheckWeapon() then table.insert(TA_MISSING_BUFFS, "Weapon Buff") end
     end
 
-    if table.getn(TA_MISSING_BUFFS) > 0 then
-        -- Update the visual UI
-        TankAudit_UpdateUI()
+    -- 4. Healthstone
+    if not TankAudit_CheckHealthstone() then
+        table.insert(TA_MISSING_BUFFS, "Healthstone")
     end
+
+    TankAudit_UpdateUI()
 end
 
+-- UI Helpers
 function TankAudit_CreateButtonPool()
     for i = 1, TA_MAX_BUTTONS do
-        -- Create a button using the XML template "TankAudit_RequestBtnTemplate"
         local btn = CreateFrame("Button", "TankAudit_Btn_"..i, UIParent, "TankAudit_RequestBtnTemplate")
-        
-        -- Set base properties
         btn:SetWidth(TA_BUTTON_SIZE)
         btn:SetHeight(TA_BUTTON_SIZE)
-        btn:SetID(i) -- Remember its index
-        
-        -- Default Position (We will move them dynamically later)
+        btn:SetID(i)
         btn:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        
-        -- Store in our pool
         tinsert(TA_BUTTON_POOL, btn)
     end
 end
 
 function TankAudit_UpdateUI()
-    -- 1. Hide all buttons first (Reset state)
-    for _, btn in pairs(TA_BUTTON_POOL) do
-        btn:Hide()
-    end
-
-    -- 2. Loop through the missing buffs list
+    for _, btn in pairs(TA_BUTTON_POOL) do btn:Hide() end
     local index = 1
-    for _, buffName in pairs(TA_MISSING_BUFFS) do
-        if index > TA_MAX_BUTTONS then break end -- Safety cap
 
+    local function SetupButton(buffName, isExpiring, timeLeft)
+        if index > TA_MAX_BUTTONS then return end
         local btn = TA_BUTTON_POOL[index]
-        
-        -- A. Find the Icon for this buff name
         local iconTexture = TankAudit_GetIconForName(buffName)
-        
-        -- B. Set the Icon
-        getglobal(btn:GetName().."Icon"):SetTexture(iconTexture)
-        
-        -- C. Position the button (Horizontal Row)
+        local iconObj = getglobal(btn:GetName().."Icon")
+        local textObj = getglobal(btn:GetName().."Text")
+
+        iconObj:SetTexture(iconTexture)
+        if isExpiring then
+            iconObj:SetDesaturated(0)
+            local mins = math.floor(timeLeft / 60)
+            if mins < 1 then mins = "<1" end
+            textObj:SetText("|cFFFFFF00" .. mins .. "m|r")
+        else
+            iconObj:SetDesaturated(1)
+            textObj:SetText("")
+        end
+
         btn:ClearAllPoints()
         if index == 1 then
-            -- First button anchors to the center
-            btn:SetPoint("CENTER", UIParent, "CENTER", -100, -100) 
+            btn:SetPoint("CENTER", UIParent, "CENTER", -100, -100)
         else
-            -- Subsequent buttons anchor to the right of the previous one
             btn:SetPoint("LEFT", TA_BUTTON_POOL[index-1], "RIGHT", TA_BUTTON_SPACING, 0)
         end
 
-        -- D. Store Data for Click and Tooltip
         btn.buffName = buffName
-        btn.tooltipText = buffName -- <--- THIS IS THE FIX
-        
-        -- E. Show it
+        btn.tooltipText = buffName
+        btn.isExpiring = isExpiring
         btn:Show()
-        
         index = index + 1
     end
+
+    for _, buffName in pairs(TA_MISSING_BUFFS) do SetupButton(buffName, false, 0) end
+    for _, buffName in pairs(TA_EXPIRING_BUFFS) do SetupButton(buffName, true, 60) end -- Placeholder time, works for visuals
 end
 
--- Stubs for future steps
-function TankAudit_InitializeDefaults() end
-function TankAudit_SetCombatState(inCombat) end
-function TankAudit_CheckHealthstone() end
+function TankAudit_GetIconForName(buffName)
+    -- Lookups
+    for class, data in pairs(TA_DATA.CLASSES) do
+        if data.SELF and data.SELF[buffName] then return "Interface\\Icons\\" .. data.SELF[buffName][1] end
+        if data.GROUP and data.GROUP[buffName] then return "Interface\\Icons\\" .. data.GROUP[buffName][1] end
+    end
+    if TA_DATA.CONSUMABLES.FOOD[buffName] then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.FOOD[buffName][1] end
+    if buffName == "Healthstone" then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.HEALTHSTONE["Healthstone"][1] end
+    if buffName == "Weapon Buff" then return "Interface\\Icons\\INV_Stone_SharpeningStone_01" end
+    return "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
 function TankAudit_RequestButton_OnClick(btn)
     local buffName = btn.buffName
     if not buffName then return end
 
-    -- Chat Throttle: Don't spam
+    -- SILENCE LOCAL BUFFS
+    if buffName == "Well Fed" then
+        DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FOOD)
+        return
+    elseif buffName == "Weapon Buff" then
+        DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_WEAPON)
+        return
+    elseif TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF and TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF[buffName] then
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[Audit]|r Cast " .. buffName .. "!")
+        return
+    end
+
+    -- THROTTLE
     if btn.lastClick and (GetTime() - btn.lastClick) < 5 then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[Audit]|r Wait before asking again.")
+        DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_WAIT_THROTTLE)
         return
     end
     btn.lastClick = GetTime()
 
-    -- Determine Channel (Party or Raid)
-    local channel = "SAY" -- Default for solo
+    -- CHANNEL
+    local channel = "SAY"
     if GetNumRaidMembers() > 0 then channel = "RAID"
     elseif GetNumPartyMembers() > 0 then channel = "PARTY"
     end
 
-    -- Send Message
-    local msg = string.format(TA_STRINGS.MSG_NEED_BUFF, buffName)
+    -- RP MESSAGE SELECTION
+    local msg = ""
+    if btn.isExpiring then
+        local timeText = getglobal(btn:GetName().."Text"):GetText() or "soon"
+        msg = string.format(TA_STRINGS.MSG_BUFF_EXPIRING, buffName, timeText)
+    else
+        if TA_RP_MESSAGES[buffName] then
+            local options = TA_RP_MESSAGES[buffName]
+            local choice = math.random(1, table.getn(options))
+            msg = options[choice]
+        else
+            msg = string.format(TA_STRINGS.MSG_NEED_BUFF, buffName)
+        end
+    end
     SendChatMessage(msg, channel)
 end
+
+function TankAudit_DebugBuffs()
+    DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[Audit] Current Buffs:|r")
+    local i = 0
+    while i < 32 do
+        local buffIndex = GetPlayerBuff(i, "HELPFUL")
+        if buffIndex < 0 then break end
+        local texture = GetPlayerBuffTexture(buffIndex)
+        if texture then DEFAULT_CHAT_FRAME:AddMessage(i .. ": " .. texture) end
+        i = i + 1
+    end
+end
+
+-- Default Stubs
+function TankAudit_InitializeDefaults() end
+function TankAudit_SetCombatState(inCombat) end
