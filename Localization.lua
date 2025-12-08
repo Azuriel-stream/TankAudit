@@ -48,6 +48,11 @@ TA_RP_MESSAGES = {
         "I need Thorns to make them pay for striking me!",
         "Let them bleed when they strike. Thorns, please!"
     },
+    ["Battle Shout"] = {
+        "Warrior, let me hear your Battle Shout!",
+        "Roar for glory! I need Battle Shout!",
+        "Strengthen our arms, Warrior! Battle Shout, please!"
+    },
     -- Fallback for any undefined buff
     ["DEFAULT"] = {
         "I need %s!",

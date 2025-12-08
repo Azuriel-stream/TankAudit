@@ -4,7 +4,10 @@ TA_DATA = {
     CLASSES = {
         WARRIOR = {
             SELF = { ["Battle Shout"] = { "Ability_Warrior_BattleShout" } },
-            GROUP = {}
+            GROUP = {
+                -- NEW: Allows other tanks to see this in the database
+                ["Battle Shout"] = { "Ability_Warrior_BattleShout" }
+            }
         },
         DRUID = {
             SELF = {
@@ -45,11 +48,6 @@ TA_DATA = {
                 ["Arcane Intellect"] = { "Spell_Holy_MagicalSentry", "Spell_Holy_ArcaneIntellect" }
             }
         },
-        WARLOCK = {
-            GROUP = {
-                ["Blood Pact"] = { "Spell_Shadow_BloodBoil" } 
-            }
-        }
     },
 
     -- 2. CONSUMABLES

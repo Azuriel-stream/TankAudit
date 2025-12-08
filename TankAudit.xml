@@ -2,48 +2,191 @@
 ..\FrameXML\UI.xsd">
 
     <Button name="TankAudit_RequestBtnTemplate" virtual="true" hidden="true">
-        <Size>
-            <AbsDimension x="32" y="32"/>
-        </Size>
+        <Size><AbsDimension x="32" y="32"/></Size>
         <Layers>
             <Layer level="ARTWORK">
                 <Texture name="$parentIcon" setAllPoints="true"/>
             </Layer>
             <Layer level="OVERLAY">
-                <FontString name="$parentText" inherits="GameFontNormalSmall" text="">
-                    <Anchors>
-                        <Anchor point="BOTTOM" relativePoint="BOTTOM" x="0" y="2"/>
-                    </Anchors>
+                <Texture name="$parentRedFlash" file="Interface\Buttons\UI-ActionButton-Border" alphaMode="ADD" hidden="true">
+                    <Size><AbsDimension x="55" y="55"/></Size>
+                    <Anchors><Anchor point="CENTER"/></Anchors>
+                    <Color r="1.0" g="0.0" b="0.0" a="1.0"/>
+                </Texture>
+                
+                <FontString name="$parentText" inherits="GameFontHighlightSmall" text="" outline="THICK">
+                    <Anchors><Anchor point="CENTER" x="0" y="0"/></Anchors>
+                    <Shadow>
+                        <Offset><AbsDimension x="1" y="-1"/></Offset>
+                        <Color r="0" g="0" b="0"/>
+                    </Shadow>
                 </FontString>
             </Layer>
         </Layers>
         <Scripts>
-            <OnClick>
-                TankAudit_RequestButton_OnClick(this);
-            </OnClick>
+            <OnClick>TankAudit_RequestButton_OnClick(this);</OnClick>
             <OnEnter>
                 GameTooltip:SetOwner(this, "ANCHOR_RIGHT");
                 GameTooltip:SetText(this.tooltipText, 1, 1, 1);
                 GameTooltip:Show();
             </OnEnter>
-            <OnLeave>
-                GameTooltip:Hide();
-            </OnLeave>
+            <OnLeave>GameTooltip:Hide();</OnLeave>
         </Scripts>
     </Button>
-    
-    <Frame name="TankAudit_Engine">
-        <Scripts>
-            <OnLoad>
-                TankAudit_OnLoad();
-            </OnLoad>
-            <OnEvent>
-                TankAudit_OnEvent(event);
-            </OnEvent>
-            <OnUpdate>
-                TankAudit_OnUpdate(arg1);
-            </OnUpdate>
-        </Scripts>
+
+    <Frame name="TankAudit_PriorityRowTemplate" virtual="true">
+        <Size><AbsDimension x="200" y="20"/></Size>
+        <Layers>
+            <Layer level="ARTWORK">
+                <FontString name="$parentName" inherits="GameFontHighlightSmall" justifyH="LEFT" text="Blessing Name">
+                    <Size><AbsDimension x="140" y="20"/></Size>
+                    <Anchors><Anchor point="LEFT"/></Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        <Frames>
+            <Button name="$parentUp">
+                <Size><AbsDimension x="16" y="16"/></Size>
+                <Anchors><Anchor point="RIGHT" x="-20" y="0"/></Anchors>
+                <NormalTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Up"/>
+                <PushedTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Down"/>
+                <DisabledTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Disabled"/>
+                <HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+                <Scripts>
+                    <OnClick>TankAudit_MovePriority(this:GetParent():GetID(), -1);</OnClick>
+                </Scripts>
+            </Button>
+            <Button name="$parentDown">
+                <Size><AbsDimension x="16" y="16"/></Size>
+                <Anchors><Anchor point="RIGHT" x="0" y="0"/></Anchors>
+                <NormalTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Up"/>
+                <PushedTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Down"/>
+                <DisabledTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Disabled"/>
+                <HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+                <Scripts>
+                    <OnClick>TankAudit_MovePriority(this:GetParent():GetID(), 1);</OnClick>
+                </Scripts>
+            </Button>
+        </Frames>
     </Frame>
 
+    <Frame name="TankAudit_ConfigFrame" toplevel="true" movable="true" enableMouse="true" hidden="true" parent="UIParent">
+        <Size>
+            <AbsDimension x="300" y="520"/>
+        </Size>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+            <BackgroundInsets><AbsInset left="11" right="12" top="12" bottom="11"/></BackgroundInsets>
+            <TileSize><AbsValue val="32"/></TileSize>
+            <EdgeSize><AbsValue val="32"/></EdgeSize>
+        </Backdrop>
+        
+        <Scripts>
+            <OnMouseDown>if ( arg1 == "LeftButton" ) then this:StartMoving(); end</OnMouseDown>
+            <OnMouseUp>this:StopMovingOrSizing();</OnMouseUp>
+            <OnShow>
+                TankAudit_Config_OnShow();
+            </OnShow>
+        </Scripts>
+
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture name="$parentHeader" file="Interface\DialogFrame\UI-DialogBox-Header">
+                    <Size><AbsDimension x="256" y="64"/></Size>
+                </Texture>
+                <FontString name="$parentTitle" inherits="GameFontNormal" text="TankAudit Settings"/>
+
+                <FontString name="TankAudit_Div_General" inherits="GameFontNormalSmall" text="---------- General ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+                <FontString name="TankAudit_Div_Filters" inherits="GameFontNormalSmall" text="---------- Filters ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+                <FontString name="TankAudit_Div_Paladin" inherits="GameFontNormalSmall" text="---------- Paladin Priority ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+                <FontString name="TankAudit_Div_Visuals" inherits="GameFontNormalSmall" text="---------- Visuals ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+            </Layer>
+        </Layers>
+
+        <Frames>
+            <CheckButton name="TankAudit_CheckEnable" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Enable TankAudit");</OnLoad>
+                    <OnClick>TankAuditDB.enabled = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckFood" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Consumables (Food/Weapon)");</OnLoad>
+                    <OnClick>TankAuditDB.checkFood = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckBuffs" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Group Buffs (Fort/MotW)");</OnLoad>
+                    <OnClick>TankAuditDB.checkBuffs = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckSelf" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Self Buffs (Shouts/Forms)");</OnLoad>
+                    <OnClick>TankAuditDB.checkSelf = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckHS" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Healthstones");</OnLoad>
+                    <OnClick>TankAuditDB.checkHealthstone = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <Frame name="TankAudit_Pri1" inherits="TankAudit_PriorityRowTemplate" id="1"/>
+            <Frame name="TankAudit_Pri2" inherits="TankAudit_PriorityRowTemplate" id="2"/>
+            <Frame name="TankAudit_Pri3" inherits="TankAudit_PriorityRowTemplate" id="3"/>
+            <Frame name="TankAudit_Pri4" inherits="TankAudit_PriorityRowTemplate" id="4"/>
+
+            <Slider name="TankAudit_ScaleSlider" inherits="OptionsSliderTemplate">
+                <Size><AbsDimension x="200" y="16"/></Size>
+                <Scripts>
+                    <OnLoad>
+                        getglobal(this:GetName().."Text"):SetText("Button Scale");
+                        getglobal(this:GetName().."High"):SetText("2.0");
+                        getglobal(this:GetName().."Low"):SetText("0.5");
+                        this:SetMinMaxValues(0.5, 2.0);
+                        this:SetValueStep(0.1);
+                    </OnLoad>
+                    <OnValueChanged>
+                        TankAuditDB.scale = this:GetValue();
+                        TankAudit_UpdateScale();
+                    </OnValueChanged>
+                </Scripts>
+            </Slider>
+
+            <Button inherits="OptionsButtonTemplate" text="Close">
+                <Anchors>
+                    <Anchor point="BOTTOM" x="0" y="20"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>TankAudit_ConfigFrame:Hide();</OnClick>
+                </Scripts>
+            </Button>
+        </Frames>
+    </Frame>
+
+    <Frame name="TankAudit_Engine">
+        <Scripts>
+            <OnLoad>TankAudit_OnLoad();</OnLoad>
+            <OnEvent>TankAudit_OnEvent(event);</OnEvent>
+            <OnUpdate>TankAudit_OnUpdate(arg1);</OnUpdate>
+        </Scripts>
+    </Frame>
 </Ui>
