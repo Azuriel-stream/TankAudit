@@ -89,6 +89,11 @@ TA_RP_MESSAGES = {
         "Let the healers' light shine brighter on me! Blessing of Light!",
         "I need the holy light to mend me faster. Blessing of Light, please!"
     },
+    ["Devotion Aura"] = {
+        "Paladin, I need your Devotion Aura for armor!",
+        "My armor is paper! Devotion Aura, please!",
+        "Protect us with your Devotion Aura!"
+    },
 
     -- WARLOCK (Healthstone)
     ["Healthstone"] = {

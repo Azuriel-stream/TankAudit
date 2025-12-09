@@ -5,7 +5,6 @@ TA_DATA = {
         WARRIOR = {
             SELF = { ["Battle Shout"] = { "Ability_Warrior_BattleShout" } },
             GROUP = {
-                -- NEW: Allows other tanks to see this in the database
                 ["Battle Shout"] = { "Ability_Warrior_BattleShout" }
             }
         },
@@ -16,7 +15,9 @@ TA_DATA = {
                 ["Bear Form"] = { "Ability_Racial_BearForm" }
             },
             GROUP = {
-                ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration" }
+                ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration" },
+                -- NEW: Added Thorns so other tanks can request it from a Druid
+                ["Thorns"] = { "Spell_Nature_Thorns" }
             }
         },
         PALADIN = {
@@ -29,16 +30,18 @@ TA_DATA = {
                 ["Blessing of Might"] = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofKings" },
                 ["Blessing of Light"] = { "Spell_Holy_PrayerOfHealing02" },
                 ["Blessing of Sanctuary"] = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary" },
-                ["Blessing of Salvation"] = { "Spell_Holy_SealOfSalvation" } -- Included for completeness
+                -- NEW: Added Devotion Aura only (to avoid conflict with Retribution Aura)
+                ["Devotion Aura"] = { "Spell_Holy_DevotionAura" }
             }
         },
         SHAMAN = {
-            SELF = { ["Lightning Shield"] = { "Spell_Nature_LightningShield" } },
+            SELF = { 
+                ["Lightning Shield"] = { "Spell_Nature_LightningShield" } 
+            },
             GROUP = {}
         },
         PRIEST = {
             GROUP = {
-                -- FIXED: Lowercase "of" in PrayerofSpirit based on your debug
                 ["Divine Spirit"] = { "Spell_Holy_DivineSpirit", "Spell_Holy_PrayerofSpirit" },
                 ["Power Word: Fortitude"] = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude" }
             }
@@ -48,12 +51,15 @@ TA_DATA = {
                 ["Arcane Intellect"] = { "Spell_Holy_MagicalSentry", "Spell_Holy_ArcaneIntellect" }
             }
         },
+        -- NEW: Added Warlock (Empty) so the Roster Scanner counts them for Healthstones
+        WARLOCK = {
+            GROUP = {} 
+        }
     },
 
     -- 2. CONSUMABLES
     CONSUMABLES = {
         FOOD = { ["Well Fed"] = { "Spell_Misc_Food" } },
-        -- Ensure this key matches exactly what we search for
         HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, 
         FLASKS = {
             ["Flask"] = { "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" }

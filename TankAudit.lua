@@ -311,7 +311,11 @@ function TankAudit_RunBuffScan()
                 local shouldCheck = true
                 
                 -- FILTER: Paladin Priority
-                if class == "PALADIN" and not validPaladinBuffs[name] then shouldCheck = false end
+                if class == "PALADIN" then
+                    if name ~= "Devotion Aura" and not validPaladinBuffs[name] then 
+                        shouldCheck = false 
+                    end
+                end
                 
                 -- FILTER: Warrior Arcane Intellect
                 if name == "Arcane Intellect" and TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false end
@@ -323,6 +327,11 @@ function TankAudit_RunBuffScan()
                     elseif not TA_ROSTER_INFO.HAS_GROUP_WARRIOR then
                         shouldCheck = false
                     end
+                end
+
+                -- FILTER: Druid Thorns Logic (Avoid duplicate for Druid players)
+                if name == "Thorns" and TA_PLAYER_CLASS == "DRUID" then
+                    shouldCheck = false
                 end
 
                 if shouldCheck then
