@@ -4,25 +4,17 @@
     <Button name="TankAudit_RequestBtnTemplate" virtual="true" hidden="true">
         <Size><AbsDimension x="32" y="32"/></Size>
         <Layers>
-            <Layer level="ARTWORK">
+            <Layer level="BACKGROUND">
                 <Texture name="$parentIcon" setAllPoints="true"/>
             </Layer>
+            
             <Layer level="OVERLAY">
-                <Texture name="$parentRedFlash" file="Interface\Buttons\UI-ActionButton-Border" alphaMode="ADD" hidden="true">
-                    <Size><AbsDimension x="55" y="55"/></Size>
+                <FontString name="$parentText" inherits="GameFontNormal" justifyH="CENTER" text="">
                     <Anchors><Anchor point="CENTER"/></Anchors>
-                    <Color r="1.0" g="0.0" b="0.0" a="1.0"/>
-                </Texture>
-                
-                <FontString name="$parentText" inherits="GameFontHighlightSmall" text="" outline="THICK">
-                    <Anchors><Anchor point="CENTER" x="0" y="0"/></Anchors>
-                    <Shadow>
-                        <Offset><AbsDimension x="1" y="-1"/></Offset>
-                        <Color r="0" g="0" b="0"/>
-                    </Shadow>
                 </FontString>
             </Layer>
         </Layers>
+        
         <Scripts>
             <OnClick>TankAudit_RequestButton_OnClick(this);</OnClick>
             <OnEnter>
@@ -165,8 +157,14 @@
                         this:SetValueStep(0.1);
                     </OnLoad>
                     <OnValueChanged>
+                        -- Update the Database
                         TankAuditDB.scale = this:GetValue();
+                        
+                        -- Update the Visuals (Size)
                         TankAudit_UpdateScale();
+                        
+                        -- NEW: Update the Label to show the number (e.g. "Button Scale: 1.2")
+                        getglobal(this:GetName().."Text"):SetText(string.format("Button Scale: %.1f", this:GetValue()));
                     </OnValueChanged>
                 </Scripts>
             </Slider>

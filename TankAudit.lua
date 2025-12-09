@@ -285,7 +285,8 @@ function TankAudit_RunBuffScan()
             if not hasBuff then
                 table.insert(TA_MISSING_BUFFS, name)
             elseif timeLeft > 0 and timeLeft < 30 then
-                table.insert(TA_EXPIRING_BUFFS, name)
+                -- FIX: Store name AND time together
+                table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
             end
         end
     end
@@ -315,10 +316,8 @@ function TankAudit_RunBuffScan()
                 
                 -- FILTER: Battle Shout Logic
                 if name == "Battle Shout" then
-                    -- If I am a Warrior, ignore (Self check handles it)
                     if TA_PLAYER_CLASS == "WARRIOR" then
                         shouldCheck = false
-                    -- If I am NOT a Warrior, only check if Warrior is in my subgroup
                     elseif not TA_ROSTER_INFO.HAS_GROUP_WARRIOR then
                         shouldCheck = false
                     end
@@ -329,7 +328,8 @@ function TankAudit_RunBuffScan()
                     if not hasBuff then
                         table.insert(TA_MISSING_BUFFS, name)
                     elseif timeLeft > 0 and timeLeft < 120 then
-                        table.insert(TA_EXPIRING_BUFFS, name)
+                        -- FIX: Store name AND time together
+                        table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                     end
                 end
             end
@@ -362,6 +362,29 @@ function TankAudit_CreateButtonPool()
         btn:SetWidth(TA_BUTTON_SIZE)
         btn:SetHeight(TA_BUTTON_SIZE)
         btn:SetID(i)
+        
+        -- 1. Get the FontString object
+        local textObj = getglobal(btn:GetName().."Text")
+        
+        -- 2. CRITICAL FIX: Force the text box to be wide enough
+        -- If this is 0 or too small, "18" gets cut off. 
+        -- We set it to 50 (wider than the 30px button) to allow overflow.
+        textObj:SetWidth(50) 
+        textObj:SetHeight(20)
+        
+        -- 3. MPOWA Style: Explicitly set Font, Size, and Outline
+        -- "Fonts\\FRIZQT__.TTF" is the standard WoW font.
+        -- "14" is the size.
+        -- "OUTLINE" creates the black border around the text so it's readable.
+        textObj:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+        
+        -- 4. Alignment
+        textObj:SetJustifyH("CENTER")
+        textObj:SetTextColor(1, 1, 1) -- Default to white (updated to Red/Yellow later)
+        
+        -- Store reference
+        btn.timerText = textObj
+        
         btn:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         tinsert(TA_BUTTON_POOL, btn)
     end
@@ -373,26 +396,32 @@ function TankAudit_UpdateButtonVisuals()
     for _, btn in pairs(TA_BUTTON_POOL) do
         if btn:IsVisible() and btn.expiresAt then
             local timeLeft = btn.expiresAt - currentTime
-            local textObj = getglobal(btn:GetName().."Text")
+            
+            -- Use the direct reference we established in CreateButtonPool
+            local textObj = btn.timerText
+            local iconObj = getglobal(btn:GetName().."Icon")
             
             if timeLeft <= 0 then
-                -- Timer ran out -> Switch to "Missing" visual immediately
-                btn.expiresAt = nil
-                btn.isExpiring = false
-                textObj:SetText("")
-                getglobal(btn:GetName().."Icon"):SetDesaturated(1)
-                
-                -- Re-check if this should be flashing (Self Buff)
-                -- (Ideally we wait for next Scan tick, but visuals are fine to wait)
+                -- Timer hit zero: Show "0" in red and desaturate
+                textObj:SetText("|cFFFF00000|r") 
+                iconObj:SetDesaturated(1)
             else
-                -- Formatting the timer
+                -- Timer running: Ensure icon is colored
+                iconObj:SetDesaturated(0)
+                
                 local timeStr = ""
                 if timeLeft > 60 then
                     timeStr = math.ceil(timeLeft / 60) .. "m"
                 else
                     timeStr = math.ceil(timeLeft)
                 end
-                textObj:SetText("|cFFFFFF00" .. timeStr .. "|r")
+                
+                -- Red text for < 10s, Yellow for > 10s
+                if timeLeft < 10 then
+                    textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
+                else
+                    textObj:SetText("|cFFFFFF00" .. timeStr .. "|r")
+                end
             end
         end
     end
@@ -417,8 +446,29 @@ function TankAudit_MovePriority(index, direction)
 end
 
 function TankAudit_UpdateUI()
-    -- We do NOT hide all buttons at the start anymore.
-    -- We will track which buttons we used, and hide the rest at the end.
+    -- 1. Get current scale 
+    local scale = TankAuditDB.scale or 1.0
+    
+    -- FIX: Use BASE sizes. Do NOT pre-multiply by scale.
+    -- The SetPoint function will apply the scale multiplier for us.
+    local btnSize = TA_BUTTON_SIZE      -- 30
+    local spacing = TA_BUTTON_SPACING   -- 5
+
+    -- 2. Count active buttons
+    local numMissing = table.getn(TA_MISSING_BUFFS)
+    local numExpiring = table.getn(TA_EXPIRING_BUFFS)
+    local totalActive = numMissing + numExpiring
+
+    -- 3. Calculate the starting Left Edge (in base coordinate space)
+    local currentXPosition = 0
+    if totalActive > 0 then
+        -- Total base width
+        local totalBaseWidth = (totalActive * btnSize) + ((totalActive - 1) * spacing)
+        
+        -- Start at the left edge, add half a button to target the center anchor
+        currentXPosition = -(totalBaseWidth / 2) + (btnSize / 2)
+    end
+
     local usedButtons = 0
     local index = 1
 
@@ -428,90 +478,67 @@ function TankAudit_UpdateUI()
         local btn = TA_BUTTON_POOL[index]
         local iconTexture = TankAudit_GetIconForName(buffName)
         local iconObj = getglobal(btn:GetName().."Icon")
-        local textObj = getglobal(btn:GetName().."Text")
-        local flashObj = getglobal(btn:GetName().."RedFlash")
+        local textObj = btn.timerText
 
-        -- Update Visuals
         iconObj:SetTexture(iconTexture)
-        
-        -- State Update
         btn.buffName = buffName
         btn.tooltipText = buffName
         
-        -- Smart Update: Only change expiry state if it's new
-        -- This prevents jittering the timer if it's already running
         if btn.isExpiring ~= isExpiring then
             btn.isExpiring = isExpiring
-            btn.expiresAt = nil -- Reset so visuals recalculate
+            btn.expiresAt = nil 
         end
 
         if isExpiring then
-            -- EXPIRING
             iconObj:SetDesaturated(0)
-            -- Only set absolute expiration time if we haven't already
-            if not btn.expiresAt then
-                btn.expiresAt = GetTime() + timeLeft
-            end
-            -- Flash Stop
-            UIFrameFlashStop(flashObj)
-            flashObj:Hide()
+            local newExpiry = GetTime() + timeLeft
+            if not btn.expiresAt then btn.expiresAt = newExpiry
+            elseif math.abs(newExpiry - btn.expiresAt) > 2 then btn.expiresAt = newExpiry end
+
+            local displayTime = btn.expiresAt - GetTime()
+            local timeStr = ""
+            if displayTime > 60 then timeStr = math.ceil(displayTime / 60) .. "m"
+            else timeStr = math.ceil(displayTime) end
+            
+            if displayTime < 10 then textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
+            else textObj:SetText("|cFFFFFF00" .. timeStr .. "|r") end
+            textObj:Show()
         else
-            -- MISSING
             iconObj:SetDesaturated(1)
             textObj:SetText("")
+            textObj:Hide()
             btn.expiresAt = nil
-            
-            -- Check Flash (Self Buffs)
-            if TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF and TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF[buffName] then
-                 -- Only start flashing if not already flashing
-                 if not flashObj:IsVisible() then
-                    UIFrameFlash(flashObj, 0.5, 0.5, -1, true)
-                 end
-            else
-                UIFrameFlashStop(flashObj)
-                flashObj:Hide()
-            end
         end
 
-        -- Layout (Always enforce position)
+        -- 4. ABSOLUTE POSITIONING (Corrected)
         btn:ClearAllPoints()
-        local scale = TankAuditDB.scale or 1.0
         btn:SetScale(scale)
         
-        if index == 1 then
-            btn:SetPoint("CENTER", UIParent, "CENTER", -100, -100)
-        else
-            btn:SetPoint("LEFT", TA_BUTTON_POOL[index-1], "RIGHT", TA_BUTTON_SPACING, 0)
-        end
+        -- We pass the BASE coordinates (currentXPosition). 
+        -- Because the button is scaled, the game draws it at (currentXPosition * scale).
+        -- We DIVIDE the Y offset by scale to keep the vertical position visually fixed on screen.
+        btn:SetPoint("CENTER", UIParent, "CENTER", currentXPosition, -100/scale)
+        
+        -- Advance by base units
+        currentXPosition = currentXPosition + btnSize + spacing
 
         btn:Show()
         usedButtons = usedButtons + 1
         index = index + 1
     end
 
-    -- Process Lists
-    for _, buffName in pairs(TA_MISSING_BUFFS) do SetupButton(buffName, false, 0) end
-    for _, buffName in pairs(TA_EXPIRING_BUFFS) do 
-        -- Recalculate time for the setup
-        local _, timeLeft = TankAudit_GetBuffStatus(TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF[buffName] or {})
-        if timeLeft == 0 then
-             for _, data in pairs(TA_DATA.CLASSES) do
-                if data.GROUP and data.GROUP[buffName] then 
-                    _, timeLeft = TankAudit_GetBuffStatus(data.GROUP[buffName])
-                    break
-                end
-             end
-        end
-        SetupButton(buffName, true, timeLeft) 
+    for _, buffName in pairs(TA_MISSING_BUFFS) do 
+        SetupButton(buffName, false, 0) 
+    end
+    
+    for _, buffData in pairs(TA_EXPIRING_BUFFS) do 
+        SetupButton(buffData.name, true, buffData.time) 
     end 
     
-    -- CLEANUP: Hide unused buttons
     for i = usedButtons + 1, TA_MAX_BUTTONS do
         local btn = TA_BUTTON_POOL[i]
         if btn:IsVisible() then
             btn:Hide()
-            UIFrameFlashStop(getglobal(btn:GetName().."RedFlash"))
-            getglobal(btn:GetName().."RedFlash"):Hide()
         end
     end
 end
@@ -625,33 +652,55 @@ function TankAudit_SetCombatState(inCombat) end
 -- =============================================================
 -- CONFIGURATION UI HANDLER
 -- =============================================================
+function TankAudit_Config_OnShow(frame)
+    -- Safety: If frame wasn't passed, try global, otherwise stop
+    if not frame then frame = getglobal("TankAudit_ConfigFrame") end
+    if not frame then return end
 
-function TankAudit_Config_OnShow()
     -- 1. Sync Checkbox States
-    TankAudit_CheckEnable:SetChecked(TankAuditDB.enabled)
-    TankAudit_CheckFood:SetChecked(TankAuditDB.checkFood)
-    TankAudit_CheckBuffs:SetChecked(TankAuditDB.checkBuffs)
-    TankAudit_CheckSelf:SetChecked(TankAuditDB.checkSelf)
-    TankAudit_CheckHS:SetChecked(TankAuditDB.checkHealthstone)
-    TankAudit_ScaleSlider:SetValue(TankAuditDB.scale)
+    -- Use safe access (getglobal) to ensure objects exist
+    local chkEnable = getglobal("TankAudit_CheckEnable")
+    if chkEnable then chkEnable:SetChecked(TankAuditDB.enabled) end
+    
+    local chkFood = getglobal("TankAudit_CheckFood")
+    if chkFood then chkFood:SetChecked(TankAuditDB.checkFood) end
+    
+    local chkBuffs = getglobal("TankAudit_CheckBuffs")
+    if chkBuffs then chkBuffs:SetChecked(TankAuditDB.checkBuffs) end
+    
+    local chkSelf = getglobal("TankAudit_CheckSelf")
+    if chkSelf then chkSelf:SetChecked(TankAuditDB.checkSelf) end
+    
+    local chkHS = getglobal("TankAudit_CheckHS")
+    if chkHS then chkHS:SetChecked(TankAuditDB.checkHealthstone) end
+    
+    local sldScale = getglobal("TankAudit_ScaleSlider")
+    if sldScale then
+        sldScale:SetValue(TankAuditDB.scale)
+        -- NEW: Force the label to update immediately on show
+        getglobal(sldScale:GetName().."Text"):SetText(string.format("Button Scale: %.1f", TankAuditDB.scale))
+    end
 
     -- 2. Sync Priority List Text
     for i=1, 4 do
-        local row = getglobal("TankAudit_Pri"..i)
         local nameText = getglobal("TankAudit_Pri"..i.."Name")
-        local blessing = TankAuditDB.paladinPriority[i] or "Unknown"
-        nameText:SetText(i..". "..blessing)
+        if nameText then
+            local blessing = TankAuditDB.paladinPriority[i] or "Unknown"
+            nameText:SetText(i..". "..blessing)
+        end
         
-        -- Disable Up button for 1st, Down button for 4th
         local upBtn = getglobal("TankAudit_Pri"..i.."Up")
         local downBtn = getglobal("TankAudit_Pri"..i.."Down")
         
-        if i == 1 then upBtn:Disable() else upBtn:Enable() end
-        if i == 4 then downBtn:Disable() else downBtn:Enable() end
+        if upBtn then 
+            if i == 1 then upBtn:Disable() else upBtn:Enable() end
+        end
+        if downBtn then
+            if i == 4 then downBtn:Disable() else downBtn:Enable() end
+        end
     end
 
-    -- 3. HEADER FIX (ItemRack Style)
-    local frame = TankAudit_ConfigFrame
+    -- 3. Header Fix
     local headerTexture = getglobal("TankAudit_ConfigFrameHeader")
     local titleText = getglobal("TankAudit_ConfigFrameTitle")
     
@@ -659,7 +708,7 @@ function TankAudit_Config_OnShow()
         headerTexture:ClearAllPoints()
         headerTexture:SetPoint("TOP", frame, "TOP", 0, 12)
     end
-    if titleText then
+    if titleText and headerTexture then
         titleText:ClearAllPoints()
         titleText:SetPoint("TOP", headerTexture, "TOP", 0, -14)
     end
@@ -667,43 +716,65 @@ function TankAudit_Config_OnShow()
     -- 4. LAYOUT
     local startY = -40
     
-    -- General
-    TankAudit_Div_General:ClearAllPoints()
-    TankAudit_Div_General:SetPoint("TOP", frame, "TOP", 0, startY)
-    TankAudit_CheckEnable:ClearAllPoints()
-    TankAudit_CheckEnable:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, startY - 20)
+    local divGeneral = getglobal("TankAudit_Div_General")
+    if divGeneral then
+        divGeneral:ClearAllPoints()
+        divGeneral:SetPoint("TOP", frame, "TOP", 0, startY)
+    end
     
-    -- Filters
+    if chkEnable then
+        chkEnable:ClearAllPoints()
+        chkEnable:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, startY - 20)
+    end
+    
     local filterY = startY - 60
-    TankAudit_Div_Filters:ClearAllPoints()
-    TankAudit_Div_Filters:SetPoint("TOP", frame, "TOP", 0, filterY)
+    local divFilters = getglobal("TankAudit_Div_Filters")
+    if divFilters then
+        divFilters:ClearAllPoints()
+        divFilters:SetPoint("TOP", frame, "TOP", 0, filterY)
+    end
     
-    TankAudit_CheckFood:ClearAllPoints()
-    TankAudit_CheckFood:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 20)
-    TankAudit_CheckBuffs:ClearAllPoints()
-    TankAudit_CheckBuffs:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 50)
-    TankAudit_CheckSelf:ClearAllPoints()
-    TankAudit_CheckSelf:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 80)
-    TankAudit_CheckHS:ClearAllPoints()
-    TankAudit_CheckHS:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 110)
+    if chkFood then
+        chkFood:ClearAllPoints()
+        chkFood:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 20)
+    end
+    if chkBuffs then
+        chkBuffs:ClearAllPoints()
+        chkBuffs:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 50)
+    end
+    if chkSelf then
+        chkSelf:ClearAllPoints()
+        chkSelf:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 80)
+    end
+    if chkHS then
+        chkHS:ClearAllPoints()
+        chkHS:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 110)
+    end
 
-    -- Paladin Priority (NEW SECTION)
     local paladinY = filterY - 150
-    TankAudit_Div_Paladin:ClearAllPoints()
-    TankAudit_Div_Paladin:SetPoint("TOP", frame, "TOP", 0, paladinY)
+    local divPaladin = getglobal("TankAudit_Div_Paladin")
+    if divPaladin then
+        divPaladin:ClearAllPoints()
+        divPaladin:SetPoint("TOP", frame, "TOP", 0, paladinY)
+    end
     
     for i=1, 4 do
         local row = getglobal("TankAudit_Pri"..i)
-        row:ClearAllPoints()
-        -- 20px height per row
-        row:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, paladinY - 20 - ((i-1)*20))
+        if row then
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, paladinY - 20 - ((i-1)*20))
+        end
     end
 
-    -- Visuals (Pushed down)
     local visualY = paladinY - 120
-    TankAudit_Div_Visuals:ClearAllPoints()
-    TankAudit_Div_Visuals:SetPoint("TOP", frame, "TOP", 0, visualY)
+    local divVisuals = getglobal("TankAudit_Div_Visuals")
+    if divVisuals then
+        divVisuals:ClearAllPoints()
+        divVisuals:SetPoint("TOP", frame, "TOP", 0, visualY)
+    end
     
-    TankAudit_ScaleSlider:ClearAllPoints()
-    TankAudit_ScaleSlider:SetPoint("TOP", frame, "TOP", 0, visualY - 30)
+    if sldScale then
+        sldScale:ClearAllPoints()
+        sldScale:SetPoint("TOP", frame, "TOP", 0, visualY - 30)
+    end
 end
