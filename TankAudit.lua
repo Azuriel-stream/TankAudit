@@ -24,6 +24,8 @@ local HS_INTERVAL = 60       -- Keep Healthstone at 60s
 local TA_DEFAULTS = {
     enabled = true,
     scale = 1.0,
+    x = 0,      -- NEW
+    y = -100,   -- NEW (Default vertical position)
     checkFood = true,
     checkBuffs = true,
     checkSelf = true,
@@ -284,7 +286,7 @@ function TankAudit_RunBuffScan()
             local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
             if not hasBuff then
                 table.insert(TA_MISSING_BUFFS, name)
-            elseif timeLeft > 0 and timeLeft < 30 then
+            elseif timeLeft > 0 and timeLeft < 15 then
                 -- FIX: Store name AND time together
                 table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
             end
@@ -448,24 +450,18 @@ end
 function TankAudit_UpdateUI()
     -- 1. Get current scale 
     local scale = TankAuditDB.scale or 1.0
-    
-    -- FIX: Use BASE sizes. Do NOT pre-multiply by scale.
-    -- The SetPoint function will apply the scale multiplier for us.
-    local btnSize = TA_BUTTON_SIZE      -- 30
-    local spacing = TA_BUTTON_SPACING   -- 5
+    local btnSize = TA_BUTTON_SIZE 
+    local spacing = TA_BUTTON_SPACING 
 
     -- 2. Count active buttons
     local numMissing = table.getn(TA_MISSING_BUFFS)
     local numExpiring = table.getn(TA_EXPIRING_BUFFS)
     local totalActive = numMissing + numExpiring
 
-    -- 3. Calculate the starting Left Edge (in base coordinate space)
+    -- 3. Calculate starting Left Edge (Base Coordinates)
     local currentXPosition = 0
     if totalActive > 0 then
-        -- Total base width
         local totalBaseWidth = (totalActive * btnSize) + ((totalActive - 1) * spacing)
-        
-        -- Start at the left edge, add half a button to target the center anchor
         currentXPosition = -(totalBaseWidth / 2) + (btnSize / 2)
     end
 
@@ -476,6 +472,10 @@ function TankAudit_UpdateUI()
         if index > TA_MAX_BUTTONS then return end
         
         local btn = TA_BUTTON_POOL[index]
+        
+        -- Apply scale
+        btn:SetScale(scale) 
+        
         local iconTexture = TankAudit_GetIconForName(buffName)
         local iconObj = getglobal(btn:GetName().."Icon")
         local textObj = btn.timerText
@@ -510,16 +510,15 @@ function TankAudit_UpdateUI()
             btn.expiresAt = nil
         end
 
-        -- 4. ABSOLUTE POSITIONING (Corrected)
+        -- 4. POSITIONING FIX
         btn:ClearAllPoints()
-        btn:SetScale(scale)
         
-        -- We pass the BASE coordinates (currentXPosition). 
-        -- Because the button is scaled, the game draws it at (currentXPosition * scale).
-        -- We DIVIDE the Y offset by scale to keep the vertical position visually fixed on screen.
-        btn:SetPoint("CENTER", UIParent, "CENTER", currentXPosition, -100/scale)
+        -- REMOVED "/ scale" from the X coordinate.
+        -- When btn has scale 2.0, SetPoint automatically multiplies this X offset by 2.0.
+        -- This means the position expands perfectly in sync with the button size.
+        -- We still divide Y by scale because we want the bar to stay on the visual horizontal line of the Anchor.
+        btn:SetPoint("CENTER", "TankAudit_Anchor", "CENTER", currentXPosition, 0)
         
-        -- Advance by base units
         currentXPosition = currentXPosition + btnSize + spacing
 
         btn:Show()
@@ -527,19 +526,12 @@ function TankAudit_UpdateUI()
         index = index + 1
     end
 
-    for _, buffName in pairs(TA_MISSING_BUFFS) do 
-        SetupButton(buffName, false, 0) 
-    end
-    
-    for _, buffData in pairs(TA_EXPIRING_BUFFS) do 
-        SetupButton(buffData.name, true, buffData.time) 
-    end 
+    for _, buffName in pairs(TA_MISSING_BUFFS) do SetupButton(buffName, false, 0) end
+    for _, buffData in pairs(TA_EXPIRING_BUFFS) do SetupButton(buffData.name, true, buffData.time) end 
     
     for i = usedButtons + 1, TA_MAX_BUTTONS do
         local btn = TA_BUTTON_POOL[i]
-        if btn:IsVisible() then
-            btn:Hide()
-        end
+        if btn:IsVisible() then btn:Hide() end
     end
 end
 
@@ -637,6 +629,7 @@ function TankAudit_InitializeDefaults()
     
     -- Apply Scale immediately
     TankAudit_UpdateScale()
+    TankAudit_SetPosition(TankAuditDB.x, TankAuditDB.y)
 end
 
 function TankAudit_UpdateScale()
@@ -644,6 +637,23 @@ function TankAudit_UpdateScale()
     for _, btn in pairs(TA_BUTTON_POOL) do
         btn:SetScale(scale)
     end
+end
+
+function TankAudit_SetPosition(x, y)
+    -- Update Database
+    TankAuditDB.x = x
+    TankAuditDB.y = y
+    
+    -- Move the Invisible Anchor
+    local anchor = getglobal("TankAudit_Anchor")
+    if anchor then
+        anchor:ClearAllPoints()
+        anchor:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    end
+
+    -- Update Config Inputs (if window is open)
+    if TankAudit_InputX then TankAudit_InputX:SetNumber(x) end
+    if TankAudit_InputY then TankAudit_InputY:SetNumber(y) end
 end
 
 -- Default Stubs
@@ -680,6 +690,9 @@ function TankAudit_Config_OnShow(frame)
         -- NEW: Force the label to update immediately on show
         getglobal(sldScale:GetName().."Text"):SetText(string.format("Button Scale: %.1f", TankAuditDB.scale))
     end
+
+    if TankAudit_InputX then TankAudit_InputX:SetNumber(TankAuditDB.x) end
+    if TankAudit_InputY then TankAudit_InputY:SetNumber(TankAuditDB.y) end
 
     -- 2. Sync Priority List Text
     for i=1, 4 do

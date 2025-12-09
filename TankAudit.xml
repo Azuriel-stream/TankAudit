@@ -1,6 +1,15 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
 ..\FrameXML\UI.xsd">
 
+    <Frame name="TankAudit_Anchor" parent="UIParent" movable="true" hidden="false">
+        <Size><AbsDimension x="1" y="1"/></Size>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
+        <Scripts>
+            <OnLoad>this:SetUserPlaced(true);</OnLoad>
+        </Scripts>
+    </Frame>
     <Button name="TankAudit_RequestBtnTemplate" virtual="true" hidden="true">
         <Size><AbsDimension x="32" y="32"/></Size>
         <Layers>
@@ -161,13 +170,59 @@
                         TankAuditDB.scale = this:GetValue();
                         
                         -- Update the Visuals (Size)
-                        TankAudit_UpdateScale();
+                        TankAudit_UpdateUI();
                         
                         -- NEW: Update the Label to show the number (e.g. "Button Scale: 1.2")
                         getglobal(this:GetName().."Text"):SetText(string.format("Button Scale: %.1f", this:GetValue()));
                     </OnValueChanged>
                 </Scripts>
             </Slider>
+
+            <EditBox name="TankAudit_InputX" inherits="InputBoxTemplate" autoFocus="false">
+                <Size><AbsDimension x="60" y="20"/></Size>
+                <Anchors>
+                    <Anchor point="TOPLEFT" relativeTo="TankAudit_ScaleSlider" relativePoint="BOTTOMLEFT">
+                        <Offset><AbsDimension x="0" y="-30"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Layers>
+                    <Layer level="ARTWORK">
+                        <FontString inherits="GameFontNormalSmall" text="X Pos:">
+                            <Anchors><Anchor point="BOTTOMLEFT" relativePoint="TOPLEFT"/></Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+                <Scripts>
+                    <OnEnterPressed>
+                        this:ClearFocus();
+                        TankAudit_SetPosition(this:GetNumber(), TankAuditDB.y);
+                    </OnEnterPressed>
+                    <OnEscapePressed>this:ClearFocus();</OnEscapePressed>
+                </Scripts>
+            </EditBox>
+
+            <EditBox name="TankAudit_InputY" inherits="InputBoxTemplate" autoFocus="false">
+                <Size><AbsDimension x="60" y="20"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="TankAudit_InputX" relativePoint="RIGHT">
+                        <Offset><AbsDimension x="40" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Layers>
+                    <Layer level="ARTWORK">
+                        <FontString inherits="GameFontNormalSmall" text="Y Pos:">
+                            <Anchors><Anchor point="BOTTOMLEFT" relativePoint="TOPLEFT"/></Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+                <Scripts>
+                    <OnEnterPressed>
+                        this:ClearFocus();
+                        TankAudit_SetPosition(TankAuditDB.x, this:GetNumber());
+                    </OnEnterPressed>
+                    <OnEscapePressed>this:ClearFocus();</OnEscapePressed>
+                </Scripts>
+            </EditBox>
 
             <Button inherits="OptionsButtonTemplate" text="Close">
                 <Anchors>
