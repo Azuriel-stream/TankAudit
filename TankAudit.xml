@@ -90,6 +90,9 @@
             <OnShow>
                 TankAudit_Config_OnShow();
             </OnShow>
+            <OnHide>
+                TankAudit_RunBuffScan();
+            </OnHide>
         </Scripts>
 
         <Layers>

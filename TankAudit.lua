@@ -11,7 +11,7 @@ local TA_EXPIRING_BUFFS = {} -- Stores result of scan
 local TA_SCAN_QUEUED = false  -- NEW: Track if a scan is waiting
 -- UI Variables
 local TA_BUTTON_POOL = {}
-local TA_MAX_BUTTONS = 10
+local TA_MAX_BUTTONS = 16
 local TA_BUTTON_SIZE = 30
 local TA_BUTTON_SPACING = 2
 local TA_FRAME_ANCHOR = "CENTER" -- Default position
@@ -65,6 +65,7 @@ function TankAudit_OnLoad()
     -- Event-Driven Updates
     this:RegisterEvent("UNIT_AURA")
     this:RegisterEvent("UNIT_INVENTORY_CHANGED")
+    this:RegisterEvent("PLAYER_TARGET_CHANGED")
     
     -- Create the UI Button Pool
     TankAudit_CreateButtonPool()
@@ -114,6 +115,9 @@ function TankAudit_OnEvent(event)
         if arg1 == "player" then
             TA_SCAN_QUEUED = true
         end
+    
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        TA_SCAN_QUEUED = true
     end
 end
 
@@ -164,6 +168,7 @@ local TA_ROSTER_INFO = {
 function TankAudit_UpdateRoster()
     TA_ROSTER_INFO.CLASSES = {}
     TA_ROSTER_INFO.HAS_GROUP_WARRIOR = false
+    TA_ROSTER_INFO.HAS_GROUP_PALADIN = false -- NEW: Track Party Paladins
     
     local numRaid = GetNumRaidMembers()
     local numParty = GetNumPartyMembers()
@@ -189,25 +194,26 @@ function TankAudit_UpdateRoster()
             local _, _, subgroup, _, _, class, _, online = GetRaidRosterInfo(i)
             if online then
                 TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
-                -- Check for Warrior in MY subgroup
-                if class == "WARRIOR" and subgroup == TA_ROSTER_INFO.MY_SUBGROUP then
-                    TA_ROSTER_INFO.HAS_GROUP_WARRIOR = true
+                
+                -- Check for Classes in MY subgroup
+                if subgroup == TA_ROSTER_INFO.MY_SUBGROUP then
+                    if class == "WARRIOR" then TA_ROSTER_INFO.HAS_GROUP_WARRIOR = true end
+                    if class == "PALADIN" then TA_ROSTER_INFO.HAS_GROUP_PALADIN = true end
                 end
             end
         end
         return
     end
 
-    -- Case 3: Party
+    -- Case 3: Party (Everyone is in your group)
     TA_ROSTER_INFO.CLASSES[TA_PLAYER_CLASS] = 1
     for i = 1, numParty do
         local unit = "party"..i
         local _, class = UnitClass(unit)
         if class and UnitIsConnected(unit) then
             TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
-            if class == "WARRIOR" then
-                TA_ROSTER_INFO.HAS_GROUP_WARRIOR = true
-            end
+            if class == "WARRIOR" then TA_ROSTER_INFO.HAS_GROUP_WARRIOR = true end
+            if class == "PALADIN" then TA_ROSTER_INFO.HAS_GROUP_PALADIN = true end
         end
     end
 end
@@ -258,6 +264,61 @@ function TankAudit_CheckWeapon()
     return true -- Found
 end
 
+-- Helper: Check if the player has learned a specific spell
+function TankAudit_HasSpell(spellName)
+    local i = 1
+    while true do
+       -- "spell" arg tells it to check the player's spellbook (not pet)
+       local name, rank = GetSpellName(i, "spell")
+       if not name then break end
+       
+       if name == spellName then 
+           return true 
+       end
+       
+       i = i + 1
+    end
+    return false
+end
+
+-- Helper: Check Stance/Form by Icon Name (Works for Warrior/Druid)
+function TankAudit_CheckStance(iconName)
+    local numForms = GetNumShapeshiftForms()
+    for i=1, numForms do
+        local texture, name, isActive = GetShapeshiftFormInfo(i)
+        if isActive and texture then
+            -- We check if the texture string contains our target icon name
+            if string.find(string.lower(texture), string.lower(iconName)) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- Helper: Scan Weapon Tooltip for Specific Enchant Name (e.g. "Rockbiter")
+function TankAudit_CheckSpecificEnchant(enchantName)
+    local hasEnchant = GetWeaponEnchantInfo()
+    if not hasEnchant then return false end
+    
+    -- Initialize Scanner Tip if missing
+    if not TA_TooltipScanner then
+        CreateFrame("GameTooltip", "TA_TooltipScanner", nil, "GameTooltipTemplate")
+        TA_TooltipScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
+    end
+    
+    TA_TooltipScanner:ClearLines()
+    TA_TooltipScanner:SetInventoryItem("player", 16) -- Main Hand
+    
+    for i=1, TA_TooltipScanner:NumLines() do
+        local text = getglobal("TA_TooltipScannerTextLeft"..i):GetText()
+        if text and string.find(text, enchantName) then
+            return true
+        end
+    end
+    return false
+end
+
 -- D. MAIN SCAN ROUTINE
 function TankAudit_RunBuffScan()
     if not TankAuditDB.enabled then 
@@ -270,35 +331,77 @@ function TankAudit_RunBuffScan()
     TA_MISSING_BUFFS = {}
     TA_EXPIRING_BUFFS = {}
 
-    -- SOLO SILENCE
+    -- Define Context Variables
     local isSolo = (GetNumPartyMembers() == 0 and GetNumRaidMembers() == 0)
     local inCombat = UnitAffectingCombat("player")
-    
-    if isSolo and not inCombat then
-        TankAudit_UpdateUI() 
-        return
-    end
 
-    -- 1. Self Buffs
+    -- 1. SCAN SELF BUFFS
     local selfBuffs = TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF
     if TankAuditDB.checkSelf and selfBuffs then
         for name, iconList in pairs(selfBuffs) do
-            local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
-            if not hasBuff then
-                table.insert(TA_MISSING_BUFFS, name)
-            elseif timeLeft > 0 and timeLeft < 15 then
-                -- FIX: Store name AND time together
-                table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
+            local knowsSpell = true
+            
+            -- Spellbook Checks
+            if name == "Bear Form" then
+                if not (TankAudit_HasSpell("Bear Form") or TankAudit_HasSpell("Dire Bear Form")) then knowsSpell = false end
+            elseif name == "Thorns" or name == "Righteous Fury" or name == "Lightning Shield" or name == "Battle Shout" then
+                if not TankAudit_HasSpell(name) then knowsSpell = false end
+            end
+
+            -- SOLO SUPPRESSION: Stances & Forms
+            -- If we are Solo, do NOT alert for missing Forms/Stances (let the player farm in peace)
+            local skipCheck = false
+            if isSolo then
+                if name == "Bear Form" or name == "Defensive Stance" or name == "Rockbiter Weapon" then
+                    skipCheck = true
+                end
+            end
+
+            if knowsSpell and not skipCheck then
+                local hasBuff = false
+                local timeLeft = 0
+                
+                -- SPECIAL HANDLERS
+                if name == "Defensive Stance" then
+                    -- Special Stance Check for Warriors
+                    hasBuff = TankAudit_CheckStance("Ability_Warrior_DefensiveStance")
+                elseif name == "Bear Form" then
+                    -- Standard Buff check works for Bear, but let's double check Stance bar for robustness
+                    hasBuff = TankAudit_GetBuffStatus(iconList) or TankAudit_CheckStance("BearForm")
+                elseif name == "Rockbiter Weapon" then
+                    -- Special Tooltip Scan for Shamans
+                    hasBuff = TankAudit_CheckSpecificEnchant("Rockbiter")
+                else
+                    -- Standard Buff Scan
+                    hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
+                end
+
+                if not hasBuff then
+                    table.insert(TA_MISSING_BUFFS, name)
+                elseif timeLeft > 0 and timeLeft < 15 then
+                    table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
+                end
             end
         end
     end
 
-    -- 2. Group Buffs
+    -- 2. SMART VISIBILITY FILTER (Solo & Out of Combat)
+    if isSolo and not inCombat then
+        local hasEnemyTarget = UnitExists("target") and UnitCanAttack("player", "target") and not UnitIsDead("target")
+        local hasMissingSelfBuffs = (table.getn(TA_MISSING_BUFFS) > 0)
+        
+        if not (hasEnemyTarget and hasMissingSelfBuffs) then
+            TA_MISSING_BUFFS = {}
+            TA_EXPIRING_BUFFS = {}
+            TankAudit_UpdateUI()
+            return 
+        end
+    end
+
+    -- 3. Group Buffs (No changes here)
     for class, data in pairs(TA_DATA.CLASSES) do
         local classCount = TA_ROSTER_INFO.CLASSES[class] or 0
-        
         if TankAuditDB.checkBuffs and classCount > 0 and data.GROUP then
-            -- Paladin Priority Logic
             local validPaladinBuffs = {}
             if class == "PALADIN" then
                 local priority = TankAuditDB.paladinPriority
@@ -306,40 +409,33 @@ function TankAudit_RunBuffScan()
                     if priority[p] then validPaladinBuffs[priority[p]] = true end
                 end
             end
-
             for name, iconList in pairs(data.GROUP) do
                 local shouldCheck = true
-                
-                -- FILTER: Paladin Priority
                 if class == "PALADIN" then
-                    if name ~= "Devotion Aura" and not validPaladinBuffs[name] then 
-                        shouldCheck = false 
+                    if name == "Devotion Aura" then
+                        -- Aura Check: STRICTLY requires a Paladin in your subgroup
+                        if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then 
+                            shouldCheck = false 
+                        end
+                    else
+                        -- Blessing Check: Allow from any Raid Paladin, but respect Priority List
+                        if not validPaladinBuffs[name] then 
+                            shouldCheck = false 
+                        end
                     end
                 end
-                
-                -- FILTER: Warrior Arcane Intellect
                 if name == "Arcane Intellect" and TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false end
-                
-                -- FILTER: Battle Shout Logic
                 if name == "Battle Shout" then
-                    if TA_PLAYER_CLASS == "WARRIOR" then
-                        shouldCheck = false
-                    elseif not TA_ROSTER_INFO.HAS_GROUP_WARRIOR then
-                        shouldCheck = false
-                    end
+                    if TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false
+                    elseif not TA_ROSTER_INFO.HAS_GROUP_WARRIOR then shouldCheck = false end
                 end
-
-                -- FILTER: Druid Thorns Logic (Avoid duplicate for Druid players)
-                if name == "Thorns" and TA_PLAYER_CLASS == "DRUID" then
-                    shouldCheck = false
-                end
+                if name == "Thorns" and TA_PLAYER_CLASS == "DRUID" then shouldCheck = false end
 
                 if shouldCheck then
                     local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
                     if not hasBuff then
                         table.insert(TA_MISSING_BUFFS, name)
                     elseif timeLeft > 0 and timeLeft < 120 then
-                        -- FIX: Store name AND time together
                         table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                     end
                 end
@@ -347,18 +443,22 @@ function TankAudit_RunBuffScan()
         end
     end
 
-    -- 3. Consumables
-    local suppressConsumables = (isSolo and inCombat)
-    if TankAuditDB.checkFood and not suppressConsumables then
+    -- 4. Consumables
+    -- SOLO SUPPRESSION: Ignore Food & Weapon Enchants if Solo
+    local checkConsumables = TankAuditDB.checkFood and not isSolo
+    
+    if checkConsumables then
         if not TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"]) then
             table.insert(TA_MISSING_BUFFS, "Well Fed")
         end
-        if TA_PLAYER_CLASS ~= "DRUID" then 
+        
+        -- Generic Weapon Check (for non-Shaman/non-Druid)
+        if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then 
             if not TankAudit_CheckWeapon() then table.insert(TA_MISSING_BUFFS, "Weapon Buff") end
         end
     end
 
-    -- 4. Healthstone
+    -- 5. Healthstone
     if TankAuditDB.checkHealthstone and not TankAudit_CheckHealthstone() then
         table.insert(TA_MISSING_BUFFS, "Healthstone")
     end
@@ -462,9 +562,19 @@ function TankAudit_UpdateUI()
     local btnSize = TA_BUTTON_SIZE 
     local spacing = TA_BUTTON_SPACING 
 
+    -- Config Mode Logic
+    local renderMissing = TA_MISSING_BUFFS
+    local renderExpiring = TA_EXPIRING_BUFFS
+    
+    local configFrame = getglobal("TankAudit_ConfigFrame")
+    if configFrame and configFrame:IsVisible() then
+        renderMissing = { "Test Button 1", "Test Button 2", "Test Button 3" }
+        renderExpiring = {} 
+    end
+
     -- 2. Count active buttons
-    local numMissing = table.getn(TA_MISSING_BUFFS)
-    local numExpiring = table.getn(TA_EXPIRING_BUFFS)
+    local numMissing = table.getn(renderMissing)
+    local numExpiring = table.getn(renderExpiring)
     local totalActive = numMissing + numExpiring
 
     -- 3. Calculate starting Left Edge (Base Coordinates)
@@ -482,7 +592,7 @@ function TankAudit_UpdateUI()
         
         local btn = TA_BUTTON_POOL[index]
         
-        -- Apply scale
+        -- Apply Scale FIRST
         btn:SetScale(scale) 
         
         local iconTexture = TankAudit_GetIconForName(buffName)
@@ -519,13 +629,11 @@ function TankAudit_UpdateUI()
             btn.expiresAt = nil
         end
 
-        -- 4. POSITIONING FIX
+        -- 4. ABSOLUTE POSITIONING FIX
         btn:ClearAllPoints()
         
-        -- REMOVED "/ scale" from the X coordinate.
-        -- When btn has scale 2.0, SetPoint automatically multiplies this X offset by 2.0.
-        -- This means the position expands perfectly in sync with the button size.
-        -- We still divide Y by scale because we want the bar to stay on the visual horizontal line of the Anchor.
+        -- CORRECTED LINE: Do NOT divide X by scale.
+        -- The SetPoint function automatically scales the X offset.
         btn:SetPoint("CENTER", "TankAudit_Anchor", "CENTER", currentXPosition, 0)
         
         currentXPosition = currentXPosition + btnSize + spacing
@@ -535,8 +643,8 @@ function TankAudit_UpdateUI()
         index = index + 1
     end
 
-    for _, buffName in pairs(TA_MISSING_BUFFS) do SetupButton(buffName, false, 0) end
-    for _, buffData in pairs(TA_EXPIRING_BUFFS) do SetupButton(buffData.name, true, buffData.time) end 
+    for _, buffName in pairs(renderMissing) do SetupButton(buffName, false, 0) end
+    for _, buffData in pairs(renderExpiring) do SetupButton(buffData.name, true, buffData.time) end 
     
     for i = usedButtons + 1, TA_MAX_BUTTONS do
         local btn = TA_BUTTON_POOL[i]
@@ -570,32 +678,59 @@ function TankAudit_RequestButton_OnClick(btn)
     local buffName = btn.buffName
     if not buffName then return end
 
-    -- SILENCE LOCAL BUFFS
-    if buffName == "Well Fed" then
-        DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FOOD)
-        return
-    elseif buffName == "Weapon Buff" then
-        DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_WEAPON)
-        return
-    elseif TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF and TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF[buffName] then
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[Audit]|r Cast " .. buffName .. "!")
+    -- 1. HANDLE CONFIG TEST BUTTONS (NEW)
+    if string.find(buffName, "Test Button") then
+        local msg = string.format("Message from %s", buffName)
+        
+        -- Use DEFAULT_CHAT_FRAME to print locally instead of annoying the party/raid
+        DEFAULT_CHAT_FRAME:AddMessage(msg) 
         return
     end
 
-    -- THROTTLE
+    -- 2. HANDLE CONSUMABLES (Open Bags)
+    if buffName == "Well Fed" or buffName == "Weapon Buff" or buffName == "Healthstone" then
+        local bagsOpen = false
+        if ContainerFrame1 and ContainerFrame1:IsVisible() then
+            bagsOpen = true
+        end
+        
+        if not bagsOpen then
+            OpenAllBags()
+        end
+
+        if buffName == "Well Fed" then
+            DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FOOD)
+        elseif buffName == "Weapon Buff" then
+            DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_WEAPON)
+        elseif buffName == "Healthstone" then
+            SendChatMessage(string.format(TA_STRINGS.MSG_NEED_HS), "SAY")
+        end
+        return
+    end
+
+    -- 3. HANDLE SELF-CASTS (Smart Action)
+    local selfBuffs = TA_DATA.CLASSES[TA_PLAYER_CLASS].SELF
+    if selfBuffs and selfBuffs[buffName] then
+        if buffName == "Bear Form" or buffName == "Defensive Stance" then
+             CastSpellByName(buffName)
+             return
+        end
+        CastSpellByName(buffName, 1)
+        return
+    end
+
+    -- 4. STANDARD GROUP REQUEST (Chat Message)
     if btn.lastClick and (GetTime() - btn.lastClick) < 5 then
         DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_WAIT_THROTTLE)
         return
     end
     btn.lastClick = GetTime()
 
-    -- CHANNEL
     local channel = "SAY"
     if GetNumRaidMembers() > 0 then channel = "RAID"
     elseif GetNumPartyMembers() > 0 then channel = "PARTY"
     end
 
-    -- RP MESSAGE SELECTION
     local msg = ""
     if btn.isExpiring then
         local timeText = getglobal(btn:GetName().."Text"):GetText() or "soon"
@@ -799,4 +934,6 @@ function TankAudit_Config_OnShow(frame)
         sldScale:ClearAllPoints()
         sldScale:SetPoint("TOP", frame, "TOP", 0, visualY - 30)
     end
+
+    TankAudit_UpdateUI()
 end
