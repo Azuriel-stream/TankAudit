@@ -1,48 +1,248 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
 ..\FrameXML\UI.xsd">
 
-    <Frame name="TankAudit_Engine">
+    <Frame name="TankAudit_Anchor" parent="UIParent" movable="true" hidden="false">
+        <Size><AbsDimension x="1" y="1"/></Size>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
         <Scripts>
-            <OnLoad>
-                TankAudit_OnLoad();
-            </OnLoad>
-            <OnEvent>
-                TankAudit_OnEvent(event);
-            </OnEvent>
-            <OnUpdate>
-                TankAudit_OnUpdate(arg1);
-            </OnUpdate>
+            <OnLoad>this:SetUserPlaced(true);</OnLoad>
         </Scripts>
     </Frame>
-
     <Button name="TankAudit_RequestBtnTemplate" virtual="true" hidden="true">
-        <Size>
-            <AbsDimension x="32" y="32"/>
-        </Size>
+        <Size><AbsDimension x="32" y="32"/></Size>
         <Layers>
-            <Layer level="ARTWORK">
+            <Layer level="BACKGROUND">
                 <Texture name="$parentIcon" setAllPoints="true"/>
             </Layer>
+            
             <Layer level="OVERLAY">
-                <FontString name="$parentText" inherits="GameFontNormalSmall" text="">
-                    <Anchors>
-                        <Anchor point="BOTTOM" relativePoint="BOTTOM" x="0" y="2"/>
-                    </Anchors>
+                <FontString name="$parentText" inherits="GameFontNormal" justifyH="CENTER" text="">
+                    <Anchors><Anchor point="CENTER"/></Anchors>
                 </FontString>
             </Layer>
         </Layers>
+        
         <Scripts>
-            <OnClick>
-                TankAudit_RequestButton_OnClick(this);
-            </OnClick>
+            <OnClick>TankAudit_RequestButton_OnClick(this);</OnClick>
             <OnEnter>
                 GameTooltip:SetOwner(this, "ANCHOR_RIGHT");
                 GameTooltip:SetText(this.tooltipText, 1, 1, 1);
                 GameTooltip:Show();
             </OnEnter>
-            <OnLeave>
-                GameTooltip:Hide();
-            </OnLeave>
+            <OnLeave>GameTooltip:Hide();</OnLeave>
         </Scripts>
     </Button>
+
+    <Frame name="TankAudit_PriorityRowTemplate" virtual="true">
+        <Size><AbsDimension x="200" y="20"/></Size>
+        <Layers>
+            <Layer level="ARTWORK">
+                <FontString name="$parentName" inherits="GameFontHighlightSmall" justifyH="LEFT" text="Blessing Name">
+                    <Size><AbsDimension x="140" y="20"/></Size>
+                    <Anchors><Anchor point="LEFT"/></Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+        <Frames>
+            <Button name="$parentUp">
+                <Size><AbsDimension x="16" y="16"/></Size>
+                <Anchors><Anchor point="RIGHT" x="-20" y="0"/></Anchors>
+                <NormalTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Up"/>
+                <PushedTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Down"/>
+                <DisabledTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Disabled"/>
+                <HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+                <Scripts>
+                    <OnClick>TankAudit_MovePriority(this:GetParent():GetID(), -1);</OnClick>
+                </Scripts>
+            </Button>
+            <Button name="$parentDown">
+                <Size><AbsDimension x="16" y="16"/></Size>
+                <Anchors><Anchor point="RIGHT" x="0" y="0"/></Anchors>
+                <NormalTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Up"/>
+                <PushedTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Down"/>
+                <DisabledTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Disabled"/>
+                <HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+                <Scripts>
+                    <OnClick>TankAudit_MovePriority(this:GetParent():GetID(), 1);</OnClick>
+                </Scripts>
+            </Button>
+        </Frames>
+    </Frame>
+
+    <Frame name="TankAudit_ConfigFrame" toplevel="true" movable="true" enableMouse="true" hidden="true" parent="UIParent">
+        <Size>
+            <AbsDimension x="300" y="520"/>
+        </Size>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
+        <Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+            <BackgroundInsets><AbsInset left="11" right="12" top="12" bottom="11"/></BackgroundInsets>
+            <TileSize><AbsValue val="32"/></TileSize>
+            <EdgeSize><AbsValue val="32"/></EdgeSize>
+        </Backdrop>
+        
+        <Scripts>
+            <OnMouseDown>if ( arg1 == "LeftButton" ) then this:StartMoving(); end</OnMouseDown>
+            <OnMouseUp>this:StopMovingOrSizing();</OnMouseUp>
+            <OnShow>
+                TankAudit_Config_OnShow();
+            </OnShow>
+            <OnHide>
+                TankAudit_RunBuffScan();
+            </OnHide>
+        </Scripts>
+
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture name="$parentHeader" file="Interface\DialogFrame\UI-DialogBox-Header">
+                    <Size><AbsDimension x="256" y="64"/></Size>
+                </Texture>
+                <FontString name="$parentTitle" inherits="GameFontNormal" text="TankAudit Settings"/>
+
+                <FontString name="TankAudit_Div_General" inherits="GameFontNormalSmall" text="---------- General ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+                <FontString name="TankAudit_Div_Filters" inherits="GameFontNormalSmall" text="---------- Filters ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+                <FontString name="TankAudit_Div_Paladin" inherits="GameFontNormalSmall" text="---------- Paladin Priority ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+                <FontString name="TankAudit_Div_Visuals" inherits="GameFontNormalSmall" text="---------- Visuals ----------">
+                    <Color r="0.7" g="0.7" b="0.7"/>
+                </FontString>
+            </Layer>
+        </Layers>
+
+        <Frames>
+            <CheckButton name="TankAudit_CheckEnable" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Enable TankAudit");</OnLoad>
+                    <OnClick>TankAuditDB.enabled = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckFood" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Consumables (Food/Weapon)");</OnLoad>
+                    <OnClick>TankAuditDB.checkFood = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckBuffs" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Group Buffs (Fort/MotW)");</OnLoad>
+                    <OnClick>TankAuditDB.checkBuffs = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckSelf" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Self Buffs (Shouts/Forms)");</OnLoad>
+                    <OnClick>TankAuditDB.checkSelf = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <CheckButton name="TankAudit_CheckHS" inherits="OptionsCheckButtonTemplate">
+                <Scripts>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Healthstones");</OnLoad>
+                    <OnClick>TankAuditDB.checkHealthstone = this:GetChecked();</OnClick>
+                </Scripts>
+            </CheckButton>
+
+            <Frame name="TankAudit_Pri1" inherits="TankAudit_PriorityRowTemplate" id="1"/>
+            <Frame name="TankAudit_Pri2" inherits="TankAudit_PriorityRowTemplate" id="2"/>
+            <Frame name="TankAudit_Pri3" inherits="TankAudit_PriorityRowTemplate" id="3"/>
+            <Frame name="TankAudit_Pri4" inherits="TankAudit_PriorityRowTemplate" id="4"/>
+
+            <Slider name="TankAudit_ScaleSlider" inherits="OptionsSliderTemplate">
+                <Size><AbsDimension x="200" y="16"/></Size>
+                <Scripts>
+                    <OnLoad>
+                        getglobal(this:GetName().."Text"):SetText("Button Scale");
+                        getglobal(this:GetName().."High"):SetText("2.0");
+                        getglobal(this:GetName().."Low"):SetText("0.5");
+                        this:SetMinMaxValues(0.5, 2.0);
+                        this:SetValueStep(0.1);
+                    </OnLoad>
+                    <OnValueChanged>
+                        -- Update the Database
+                        TankAuditDB.scale = this:GetValue();
+                        
+                        -- Update the Visuals (Size)
+                        TankAudit_UpdateUI();
+                        
+                        -- NEW: Update the Label to show the number (e.g. "Button Scale: 1.2")
+                        getglobal(this:GetName().."Text"):SetText(string.format("Button Scale: %.1f", this:GetValue()));
+                    </OnValueChanged>
+                </Scripts>
+            </Slider>
+
+            <EditBox name="TankAudit_InputX" inherits="InputBoxTemplate" autoFocus="false" letters="6">
+                <Size><AbsDimension x="60" y="20"/></Size>
+                <Anchors>
+                    <Anchor point="TOPLEFT" relativeTo="TankAudit_ScaleSlider" relativePoint="BOTTOMLEFT">
+                        <Offset><AbsDimension x="0" y="-30"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Layers>
+                    <Layer level="ARTWORK">
+                        <FontString inherits="GameFontNormalSmall" text="X Pos:">
+                            <Anchors><Anchor point="BOTTOMLEFT" relativePoint="TOPLEFT"/></Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+                <Scripts>
+                    <OnEnterPressed>
+                        this:ClearFocus();
+                        TankAudit_SetPosition(this:GetNumber(), TankAuditDB.y);
+                    </OnEnterPressed>
+                    <OnEscapePressed>this:ClearFocus();</OnEscapePressed>
+                </Scripts>
+            </EditBox>
+
+            <EditBox name="TankAudit_InputY" inherits="InputBoxTemplate" autoFocus="false" letters="6">
+                <Size><AbsDimension x="60" y="20"/></Size>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="TankAudit_InputX" relativePoint="RIGHT">
+                        <Offset><AbsDimension x="40" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Layers>
+                    <Layer level="ARTWORK">
+                        <FontString inherits="GameFontNormalSmall" text="Y Pos:">
+                            <Anchors><Anchor point="BOTTOMLEFT" relativePoint="TOPLEFT"/></Anchors>
+                        </FontString>
+                    </Layer>
+                </Layers>
+                <Scripts>
+                    <OnEnterPressed>
+                        this:ClearFocus();
+                        TankAudit_SetPosition(TankAuditDB.x, this:GetNumber());
+                    </OnEnterPressed>
+                    <OnEscapePressed>this:ClearFocus();</OnEscapePressed>
+                </Scripts>
+            </EditBox>
+
+            <Button inherits="OptionsButtonTemplate" text="Close">
+                <Anchors>
+                    <Anchor point="BOTTOM" x="0" y="20"/>
+                </Anchors>
+                <Scripts>
+                    <OnClick>TankAudit_ConfigFrame:Hide();</OnClick>
+                </Scripts>
+            </Button>
+        </Frames>
+    </Frame>
+
+    <Frame name="TankAudit_Engine">
+        <Scripts>
+            <OnLoad>TankAudit_OnLoad();</OnLoad>
+            <OnEvent>TankAudit_OnEvent(event);</OnEvent>
+            <OnUpdate>TankAudit_OnUpdate(arg1);</OnUpdate>
+        </Scripts>
+    </Frame>
 </Ui>
