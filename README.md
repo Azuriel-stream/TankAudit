@@ -1,64 +1,55 @@
 # TankAudit
 
-**TankAudit** is a smart, context-aware buff and consumable monitor designed specifically for Tanks in Vanilla WoW (1.12) and Turtle WoW.
+**TankAudit** is a lightweight, context-aware auditing tool designed specifically for Tanks in Vanilla (1.12) and Turtle WoW. It monitors your self-buffs, stances, group buffs, and consumables, alerting you only when you are unprepared for combat.
 
-Unlike generic buff monitors that just check for a static list of spells, TankAudit analyzes your **Raid Roster**, **Subgroup**, **Combat Status**, and **Location** to determine exactly what you are missing. It then provides a simple, clickable interface to request those buffs from your teammates using immersive roleplay-style chat messages.
+## Key Features
 
-## Features
-
-### 🧠 Smart Roster Analysis
-TankAudit scans your group composition to prevent useless alerts:
-* **Class Aware:** It won't ask for *Power Word: Fortitude* if there is no Priest in the group.
-* **Subgroup Aware:** It only tracks *Blood Pact* if a Warlock is in your specific party subgroup.
-* **Paladin Scaling:** Automatically adjusts required Blessings based on the number of Paladins in the raid (e.g., if you have 2 Paladins, it only checks for your Top 2 priority blessings).
-* **Role Aware:** Filters out useless buffs (e.g., *Arcane Intellect* is ignored for Warriors).
-
-### ⚔️ Combat & Context Logic
-* **Solo Mode:** Completely silent when you are alone and out of combat to reduce clutter.
-* **Combat Mode:** Switches to "Survival Mode" in combat—ignoring food/flasks but alerting you to critical missing buffs (like *Battle Shout* or *Bear Form*) and dispellable debuffs.
-* **Consumables:** Tracks Food, Flasks/Elixirs, and Weapon Enchants (Sharpening Stones/Oils/Rockbiter), but suppresses these alerts during combat.
-
-### 💬 One-Click Request System
-When a buff is missing, a clickable icon appears on your screen.
-* **Click to Ask:** Sends a message to Party or Raid chat requesting the specific buff.
-* **RP Flavor:** Uses randomized, roleplay-friendly messages (e.g., *"Druid, cover me in Thorns!"*) to keep chat interesting.
-* **Anti-Spam:** Built-in throttle prevents you from spamming chat if you click multiple times.
-* **Local Alerts:** Self-buffs (like *Weapon Stones* or *Well Fed*) display a local red warning message to you instead of spamming the raid.
-
-### 🛡️ Supported Classes
-Fully supports all Vanilla tanking classes, including Turtle WoW hybrids:
-* **Warrior** (Battle Shout, Consumables)
-* **Druid** (Bear Form, Thorns, Omen of Clarity)
-* **Paladin** (Righteous Fury, Auras, Holy Shield)
-* **Shaman** (Rockbiter Weapon, Lightning Shield, Shield Specialization)
+* **Smart Context Awareness:** The auditing bar automatically hides when you are playing solo and out of combat to keep your interface clean. It instantly wakes up when you target an enemy, enter combat, or join a group.
+* **One-Click Actions:** Buttons are interactive!
+    * **Self-Buffs:** Left-click to auto-cast missing buffs (e.g., *Battle Shout*, *Thorns*, *Righteous Fury*, *Bear Form*).
+    * **Consumables:** Left-click missing Food or Weapon Enchants to instantly open your bags.
+    * **Group Requests:** Left-click missing raid buffs (e.g., *Fortitude*) to send a polite request to the group/raid chat.
+* **Solo Mode:** Intelligently suppresses "hardcore" requirements (like Weapon Oils, Food, or Defensive Stance) when you are playing solo, so you can quest in peace.
+* **Dynamic UI:** The button bar is centered, scalable, and movable. It grows and shrinks dynamically based on how many alerts are active.
 
 ## Installation
 
-1.  Download the **TankAudit** folder.
-2.  Place the folder into your World of Warcraft AddOns directory:
-    `.../World of Warcraft/Interface/AddOns/TankAudit/`
-3.  Launch the game.
+### Turtle WoW Launcher / GitAddonsManager
+1.  Open either application.
+2.  Click the **Add** button.
+3.  Paste the url: `https://github.com/Azuriel-stream/TankAudit`
+4.  Download and keep up to date.
 
-## Usage
+### Manual Installation
+1.  Download the latest **.zip** file from the Releases page.
+2.  Extract the contents.
+3.  Ensure the folder is named `TankAudit` (remove `-main` or version numbers if present).
+4.  Move the folder to your `\World of Warcraft\Interface\AddOns\` directory.
 
-### Slash Commands
-* `/taudit` - Displays the addon status and version.
-* `/taudit config` - Opens the **Configuration Panel**.
-* `/taudit debug` - Prints current buff textures to the chat frame (useful for debugging spell IDs).
+## Configuration
 
-### Configuration Panel
-Access the settings via `/taudit config`.
-* **General:** Enable/Disable the entire addon.
-* **Filters:** Toggle specific alert categories (Consumables, Group Buffs, Self Buffs, Healthstones).
-* **Visuals:** Adjust the scale of the request buttons.
-* **Paladin Priority:** Reorder your preferred Blessings. The addon will use this list to determine which blessings to check for based on available Paladins.
+Type `/taudit` to open the configuration panel.
 
-## Interaction
-* **Missing Buff:** Icon appears **Grey**. Click to request.
-* **Expiring Buff (< 2 min):** Icon appears **Colored** with a timer. Click to announce expiration.
-* **Expiring Self-Buff (< 30s):** Icon appears for short-duration buffs like *Battle Shout* to ensure 100% uptime.
+* **Button Scale:** Resize the UI to fit your screen.
+* **Position:** Move the bar using X/Y coordinates (or simply drag the invisible anchor while in config mode).
+* **Test Mode:** Shows dummy buttons so you can configure the layout without being unbuffed.
+* **Toggles:** Enable/Disable checks for Food, Healthstones, or specific buff categories.
 
-## Author
-**Azuriel**
+## Tracked Buffs & Mechanics
 
-*Developed for the Vanilla WoW community.*
+TankAudit scans your character, your inventory, and your group roster to determine exactly what you need.
+
+### Class Abilities
+The addon automatically detects your class and tracks essential tanking mechanics:
+* **Self Buffs & Stances:** Alerts you if you are missing critical maintenance buffs (e.g., *Righteous Fury*, *Lightning Shield*) or are in the wrong Stance/Form for tanking (e.g., *Defensive Stance*, *Bear Form*).
+* **Group Utility:** Monitors powerful buffs provided by your party members (e.g., *Fortitude*, *Mark of the Wild*, *Blessings*, *Thorns*) and lets you request them with a click.
+* **Smart Filtering:** Automatically hides alerts for buffs you cannot receive (e.g., prevents Paladin Aura alerts if the Paladin is in a different subgroup).
+
+### General / Consumables
+* **Food:** Checks for "Well Fed" status (suppressed when solo).
+* **Weapon Buffs:** Checks for Sharpening Stones / Wizard Oils / Rockbiter (suppressed when solo).
+* **Healthstone:** Checks your bags if a Warlock is present in the group/raid.
+
+## Tips
+* **Leveling Friendly:** The addon checks your spellbook before alerting. It won't yell at a low-level Druid for missing *Bear Form* or a Warrior for missing *Defensive Stance* if you haven't visited the trainer to learn them yet.
+* **Low Friction:** The UI is designed to be invisible when you are doing your job correctly. If the screen is empty, you are ready to pull.

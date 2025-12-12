@@ -181,7 +181,7 @@
                 </Scripts>
             </Slider>
 
-            <EditBox name="TankAudit_InputX" inherits="InputBoxTemplate" autoFocus="false">
+            <EditBox name="TankAudit_InputX" inherits="InputBoxTemplate" autoFocus="false" letters="6">
                 <Size><AbsDimension x="60" y="20"/></Size>
                 <Anchors>
                     <Anchor point="TOPLEFT" relativeTo="TankAudit_ScaleSlider" relativePoint="BOTTOMLEFT">
@@ -204,7 +204,7 @@
                 </Scripts>
             </EditBox>
 
-            <EditBox name="TankAudit_InputY" inherits="InputBoxTemplate" autoFocus="false">
+            <EditBox name="TankAudit_InputY" inherits="InputBoxTemplate" autoFocus="false" letters="6">
                 <Size><AbsDimension x="60" y="20"/></Size>
                 <Anchors>
                     <Anchor point="LEFT" relativeTo="TankAudit_InputX" relativePoint="RIGHT">

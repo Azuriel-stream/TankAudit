@@ -9,6 +9,7 @@ local TA_ROSTER_CLASSES = {} -- Stores classes present in group: { ["PRIEST"] = 
 local TA_MISSING_BUFFS = {}  -- Stores result of scan
 local TA_EXPIRING_BUFFS = {} -- Stores result of scan
 local TA_SCAN_QUEUED = false  -- NEW: Track if a scan is waiting
+local TA_KNOWN_SPELLS = {}
 -- UI Variables
 local TA_BUTTON_POOL = {}
 local TA_MAX_BUTTONS = 16
@@ -61,6 +62,7 @@ function TankAudit_OnLoad()
     this:RegisterEvent("PLAYER_ENTERING_WORLD")
     this:RegisterEvent("PLAYER_REGEN_DISABLED")
     this:RegisterEvent("PLAYER_REGEN_ENABLED")
+    this:RegisterEvent("LEARNED_SPELL_IN_TAB")
 
     -- Event-Driven Updates
     this:RegisterEvent("UNIT_AURA")
@@ -99,7 +101,11 @@ function TankAudit_OnEvent(event)
 
     if event == "PLAYER_ENTERING_WORLD" then
         TankAudit_InitializeDefaults()
+        TankAudit_CacheSpells()
         
+    elseif event == "LEARNED_SPELL_IN_TAB" then
+        TankAudit_CacheSpells()
+
     elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
         -- Combat State Change: Queue Scan
         TA_SCAN_QUEUED = true
@@ -128,17 +134,20 @@ function TankAudit_OnUpdate(elapsed)
         return 
     end
 
-    -- 1. Process Queued Scans (The Fix for Instant Updates)
-    -- This runs 1 frame after the Event fired, ensuring GetPlayerBuff is ready.
+    -- 1. CRITICAL FIX: Process Queued Scans (Instant Response)
+    -- If an event (like targeting) set this flag, run the scan NOW.
     if TA_SCAN_QUEUED then
         TankAudit_RunBuffScan()
         TA_SCAN_QUEUED = false
+        timeSinceLastScan = 0 -- Reset the safety timer so we don't double-scan
     end
 
     -- 2. Run Visual Updates (Every Frame)
+    -- Keeps the countdown timers smooth
     TankAudit_UpdateButtonVisuals()
 
     -- 3. Update Buff Scan Timer (Safety Net - Every 3s)
+    -- This catches buffs expiring naturally if no events fire
     timeSinceLastScan = timeSinceLastScan + elapsed
     if timeSinceLastScan > SCAN_INTERVAL then
         TankAudit_RunBuffScan()
@@ -264,21 +273,10 @@ function TankAudit_CheckWeapon()
     return true -- Found
 end
 
--- Helper: Check if the player has learned a specific spell
+-- Helper: Check cache for spell (Instant Lookup)
 function TankAudit_HasSpell(spellName)
-    local i = 1
-    while true do
-       -- "spell" arg tells it to check the player's spellbook (not pet)
-       local name, rank = GetSpellName(i, "spell")
-       if not name then break end
-       
-       if name == spellName then 
-           return true 
-       end
-       
-       i = i + 1
-    end
-    return false
+    -- We simply ask: Is this name in our 'Known Spells' table?
+    return TA_KNOWN_SPELLS[spellName]
 end
 
 -- Helper: Check Stance/Form by Icon Name (Works for Warrior/Druid)
@@ -317,6 +315,18 @@ function TankAudit_CheckSpecificEnchant(enchantName)
         end
     end
     return false
+end
+
+--- Helper: Cache Known Spells (Optimization)
+function TankAudit_CacheSpells()
+    TA_KNOWN_SPELLS = {} -- Clear cache
+    local i = 1
+    while true do
+       local name, rank = GetSpellName(i, "spell")
+       if not name then break end
+       TA_KNOWN_SPELLS[name] = true
+       i = i + 1
+    end
 end
 
 -- D. MAIN SCAN ROUTINE
