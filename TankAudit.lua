@@ -21,6 +21,15 @@ local timeSinceLastScan = 0
 local SCAN_INTERVAL = 3      -- UPDATED: Faster checks (was 15)
 local timeSinceLastHS = 0
 local HS_INTERVAL = 60       -- Keep Healthstone at 60s
+
+-- Thresholds & Limits
+local MAX_BUFF_SLOTS = 32                -- Maximum buff slots to scan per player
+local BUFF_WARNING_SELF = 15             -- Seconds before self-buff expiry warning
+local BUFF_WARNING_GROUP = 120           -- Seconds before group-buff expiry warning
+local REQUEST_THROTTLE = 5               -- Seconds between buff requests
+local TIMER_WARNING_THRESHOLD = 10       -- Seconds to display timer in red
+local MAIN_HAND_SLOT = 16                -- Inventory slot ID for main hand weapon
+
 -- Default Settings
 local TA_DEFAULTS = {
     enabled = true,
@@ -45,6 +54,21 @@ local _tgetn = table.getn
 local _mathceil = math.ceil
 local _mathabs = math.abs
 local _mathrandom = math.random
+
+-- ================================================================
+-- HELPER FUNCTIONS
+-- ================================================================
+
+-- Format seconds into readable time string
+-- @param seconds (number) - Time remaining in seconds
+-- @return (string) - Formatted string like "2m" or "15"
+local function FormatTimeLeft(seconds)
+    if seconds > 60 then
+        return _mathceil(seconds / 60) .. "m"
+    else
+        return tostring(_mathceil(seconds)) .. "s"
+    end
+end
 
 
 -- 2. Slash Command Registration
@@ -241,9 +265,13 @@ function TankAudit_UpdateRoster()
 end
 
 -- B. Buff Scanner
+-- Scan player buffs for a specific buff by icon name
+-- @param iconList (table) - Array of icon texture names to search for
+-- @return hasBuff (boolean) - True if buff is active
+-- @return timeLeft (number) - Seconds remaining on the buff (0 if not found)
 function TankAudit_GetBuffStatus(iconList)
     local i = 0
-    while i < 32 do
+    while i < MAX_BUFF_SLOTS do
         local buffIndex = GetPlayerBuff(i, "HELPFUL")
         if buffIndex < 0 then break end
         
@@ -319,7 +347,7 @@ function TankAudit_CheckSpecificEnchant(enchantName)
     end
     
     TA_TooltipScanner:ClearLines()
-    TA_TooltipScanner:SetInventoryItem("player", 16) -- Main Hand
+    TA_TooltipScanner:SetInventoryItem("player", MAIN_HAND_SLOT) -- Main Hand
     
     for i=1, TA_TooltipScanner:NumLines() do
         local text = getglobal("TA_TooltipScannerTextLeft"..i):GetText()
@@ -343,6 +371,10 @@ function TankAudit_CacheSpells()
 end
 
 -- D. MAIN SCAN ROUTINE
+-- Main audit routine - scans all buffs and updates missing/expiring lists
+-- Checks self-buffs, group buffs, consumables, and healthstones
+-- Applies context-aware filtering (solo suppression, combat state, etc.)
+-- Updates TA_MISSING_BUFFS and TA_EXPIRING_BUFFS tables
 function TankAudit_RunBuffScan()
     if not TankAuditDB.enabled then 
         TankAudit_UpdateUI()
@@ -401,7 +433,7 @@ function TankAudit_RunBuffScan()
 
                 if not hasBuff then
                     _tinsert(TA_MISSING_BUFFS, name)
-                elseif timeLeft > 0 and timeLeft < 15 then
+                elseif timeLeft > 0 and timeLeft < BUFF_WARNING_SELF then
                     _tinsert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                 end
             end
@@ -458,7 +490,7 @@ function TankAudit_RunBuffScan()
                     local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
                     if not hasBuff then
                         _tinsert(TA_MISSING_BUFFS, name)
-                    elseif timeLeft > 0 and timeLeft < 120 then
+                    elseif timeLeft > 0 and timeLeft < BUFF_WARNING_GROUP then
                         _tinsert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                     end
                 end
@@ -490,6 +522,9 @@ function TankAudit_RunBuffScan()
 end
 
 -- UI Helpers
+-- Create reusable button pool for displaying audit alerts
+-- Initializes all buttons with proper sizing, fonts, and references
+-- Called once during addon initialization
 function TankAudit_CreateButtonPool()
     for i = 1, TA_MAX_BUTTONS do
         local btn = CreateFrame("Button", "TankAudit_Btn_"..i, UIParent, "TankAudit_RequestBtnTemplate")
@@ -524,6 +559,9 @@ function TankAudit_CreateButtonPool()
     end
 end
 
+-- Update button timers and visual states every frame
+-- Refreshes countdown text and icon desaturation for expiring buffs
+-- Called by OnUpdate to keep timers smooth
 function TankAudit_UpdateButtonVisuals()
     local currentTime = GetTime()
     
@@ -543,15 +581,10 @@ function TankAudit_UpdateButtonVisuals()
                 -- Timer running: Ensure icon is colored
                 iconObj:SetDesaturated(0)
                 
-                local timeStr = ""
-                if timeLeft > 60 then
-                    timeStr = _mathceil(timeLeft / 60) .. "m"
-                else
-                    timeStr = _mathceil(timeLeft)
-                end
+                local timeStr = FormatTimeLeft(timeLeft)
                 
                 -- Red text for < 10s, Yellow for > 10s
-                if timeLeft < 10 then
+                if timeLeft < TIMER_WARNING_THRESHOLD then
                     textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
                 else
                     textObj:SetText("|cFFFFFF00" .. timeStr .. "|r")
@@ -561,6 +594,9 @@ function TankAudit_UpdateButtonVisuals()
     end
 end
 
+-- Move a Paladin blessing priority up or down in the list
+-- @param index (number) - Current position in priority list (1-4)
+-- @param direction (number) - Move direction: -1 (up) or 1 (down)
 function TankAudit_MovePriority(index, direction)
     -- Direction: -1 (Up), 1 (Down)
     local newIndex = index + direction
@@ -579,6 +615,9 @@ function TankAudit_MovePriority(index, direction)
     TankAudit_Config_OnShow() -- Re-runs layout/text update
 end
 
+-- Rebuild and position all audit buttons based on current scan results
+-- Handles scaling, positioning, test mode, and button state management
+-- Creates centered horizontal row of icons showing missing/expiring buffs
 function TankAudit_UpdateUI()
     -- 1. Get current scale 
     local scale = TankAuditDB.scale or 1.0
@@ -610,6 +649,11 @@ function TankAudit_UpdateUI()
     local usedButtons = 0
     local index = 1
 
+-- Configure a single button to display a buff alert
+-- Handles icon, text, color, scaling, and positioning
+-- @param buffName (string) - Name of the buff to display
+-- @param isExpiring (boolean) - True if buff is expiring, false if missing
+-- @param timeLeft (number) - Seconds remaining (0 if missing)
     local function SetupButton(buffName, isExpiring, timeLeft)
         if index > TA_MAX_BUTTONS then return end
         
@@ -638,11 +682,9 @@ function TankAudit_UpdateUI()
             elseif _mathabs(newExpiry - btn.expiresAt) > 2 then btn.expiresAt = newExpiry end
 
             local displayTime = btn.expiresAt - GetTime()
-            local timeStr = ""
-            if displayTime > 60 then timeStr = _mathceil(displayTime / 60) .. "m"
-            else timeStr = _mathceil(displayTime) end
+            local timeStr = FormatTimeLeft(displayTime)
             
-            if displayTime < 10 then textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
+            if displayTime < TIMER_WARNING_THRESHOLD then textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
             else textObj:SetText("|cFFFFFF00" .. timeStr .. "|r") end
             textObj:Show()
         else
@@ -675,6 +717,10 @@ function TankAudit_UpdateUI()
     end
 end
 
+-- Look up the icon texture path for a given buff name
+-- Searches class buffs, consumables, and hardcoded entries
+-- @param buffName (string) - Name of the buff/item
+-- @return (string) - Full texture path (e.g., "Interface\\Icons\\Spell_Nature_Thorns")
 function TankAudit_GetIconForName(buffName)
     -- 1. Check Class Buffs
     for class, data in pairs(TA_DATA.CLASSES) do
@@ -697,6 +743,13 @@ function TankAudit_GetIconForName(buffName)
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
+-- Handle click events on audit buttons
+-- Behavior depends on buff type:
+--   • Self-buffs: Auto-cast the spell
+--   • Consumables: Open bags with reminder message
+--   • Group buffs: Send request message to party/raid chat
+-- Includes throttling to prevent spam
+-- @param btn (frame) - The button that was clicked
 function TankAudit_RequestButton_OnClick(btn)
     local buffName = btn.buffName
     if not buffName then return end
@@ -743,7 +796,7 @@ function TankAudit_RequestButton_OnClick(btn)
     end
 
     -- 4. STANDARD GROUP REQUEST (Chat Message)
-    if btn.lastClick and (GetTime() - btn.lastClick) < 5 then
+    if btn.lastClick and (GetTime() - btn.lastClick) < REQUEST_THROTTLE then
         DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_WAIT_THROTTLE)
         return
     end
@@ -773,7 +826,7 @@ end
 function TankAudit_DebugBuffs()
     DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[Audit] Current Buffs:|r")
     local i = 0
-    while i < 32 do
+    while i < MAX_BUFF_SLOTS do
         local buffIndex = GetPlayerBuff(i, "HELPFUL")
         if buffIndex < 0 then break end
         local texture = GetPlayerBuffTexture(buffIndex)
@@ -782,6 +835,8 @@ function TankAudit_DebugBuffs()
     end
 end
 
+-- Initialize saved variables with default values if missing
+-- Called on PLAYER_ENTERING_WORLD to ensure TankAuditDB is populated
 function TankAudit_InitializeDefaults()
     if not TankAuditDB then
         TankAuditDB = {}
@@ -806,6 +861,9 @@ function TankAudit_UpdateScale()
     end
 end
 
+-- Update the anchor position and sync with config UI
+-- @param x (number) - Horizontal offset from screen center
+-- @param y (number) - Vertical offset from screen center
 function TankAudit_SetPosition(x, y)
     -- Update Database
     TankAuditDB.x = x
