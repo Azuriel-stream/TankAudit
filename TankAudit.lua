@@ -1,7 +1,7 @@
 -- TankAudit.lua
 
 -- 1. Constants & Variables
-local TA_VERSION = "1.0.0"
+local TA_VERSION = "1.1.1"
 local TA_PLAYER_CLASS = nil
 local TA_IS_TANK = false
 -- State Variables
@@ -10,6 +10,7 @@ local TA_MISSING_BUFFS = {}  -- Stores result of scan
 local TA_EXPIRING_BUFFS = {} -- Stores result of scan
 local TA_SCAN_QUEUED = false  -- NEW: Track if a scan is waiting
 local TA_KNOWN_SPELLS = {}
+local TA_HAS_PROT_PALADIN = false
 -- UI Variables
 local TA_BUTTON_POOL = {}
 local TA_MAX_BUTTONS = 16
@@ -21,6 +22,15 @@ local timeSinceLastScan = 0
 local SCAN_INTERVAL = 3      -- UPDATED: Faster checks (was 15)
 local timeSinceLastHS = 0
 local HS_INTERVAL = 60       -- Keep Healthstone at 60s
+
+-- Thresholds & Limits
+local MAX_BUFF_SLOTS = 32                -- Maximum buff slots to scan per player
+local BUFF_WARNING_SELF = 15             -- Seconds before self-buff expiry warning
+local BUFF_WARNING_GROUP = 120           -- Seconds before group-buff expiry warning
+local REQUEST_THROTTLE = 5               -- Seconds between buff requests
+local TIMER_WARNING_THRESHOLD = 10       -- Seconds to display timer in red
+local MAIN_HAND_SLOT = 16                -- Inventory slot ID for main hand weapon
+
 -- Default Settings
 local TA_DEFAULTS = {
     enabled = true,
@@ -33,6 +43,34 @@ local TA_DEFAULTS = {
     checkHealthstone = true,
     paladinPriority = { "Blessing of Kings", "Blessing of Might", "Blessing of Light", "Blessing of Sanctuary" }
 }
+
+-- ================================================================
+-- LOCALIZE GLOBAL FUNCTIONS (Performance & Safety - 1.12 Best Practice)
+-- ================================================================
+local _strfind = string.find
+local _strlower = string.lower
+local _strformat = string.format
+local _tinsert = table.insert
+local _tgetn = table.getn
+local _mathceil = math.ceil
+local _mathabs = math.abs
+local _mathrandom = math.random
+
+-- ================================================================
+-- HELPER FUNCTIONS
+-- ================================================================
+
+-- Format seconds into readable time string
+-- @param seconds (number) - Time remaining in seconds
+-- @return (string) - Formatted string like "2m" or "15"
+local function FormatTimeLeft(seconds)
+    if seconds > 60 then
+        return _mathceil(seconds / 60) .. "m"
+    else
+        return tostring(_mathceil(seconds)) .. "s"
+    end
+end
+
 
 -- 2. Slash Command Registration
 SLASH_TANKAUDIT1 = "/taudit"
@@ -74,7 +112,7 @@ function TankAudit_OnLoad()
 
     -- Print Loaded Message
     -- Formats the string: "[TankAudit] v1.0.0 active. Type /taudit to open settings."
-    DEFAULT_CHAT_FRAME:AddMessage(string.format(TA_STRINGS.LOADED, TA_VERSION))
+    DEFAULT_CHAT_FRAME:AddMessage(_strformat(TA_STRINGS.LOADED, TA_VERSION))
 end
 
 -- 4. Slash Command Handler
@@ -228,16 +266,20 @@ function TankAudit_UpdateRoster()
 end
 
 -- B. Buff Scanner
+-- Scan player buffs for a specific buff by icon name
+-- @param iconList (table) - Array of icon texture names to search for
+-- @return hasBuff (boolean) - True if buff is active
+-- @return timeLeft (number) - Seconds remaining on the buff (0 if not found)
 function TankAudit_GetBuffStatus(iconList)
     local i = 0
-    while i < 32 do
+    while i < MAX_BUFF_SLOTS do
         local buffIndex = GetPlayerBuff(i, "HELPFUL")
         if buffIndex < 0 then break end
         
         local texture = GetPlayerBuffTexture(buffIndex)
         if texture then
             for _, validIcon in pairs(iconList) do
-                if string.find(string.lower(texture), string.lower(validIcon)) then
+                if _strfind(_strlower(texture), _strlower(validIcon)) then
                     local timeLeft = GetPlayerBuffTimeLeft(buffIndex)
                     return true, timeLeft
                 end
@@ -256,7 +298,7 @@ function TankAudit_CheckHealthstone()
     for bag = 0, 4 do
         for slot = 1, GetContainerNumSlots(bag) do
             local link = GetContainerItemLink(bag, slot)
-            if link and string.find(link, "Healthstone") then
+            if link and _strfind(link, "Healthstone") then
                 return true -- Found one
             end
         end
@@ -264,13 +306,22 @@ function TankAudit_CheckHealthstone()
     return false -- Missing
 end
 
--- Helper: Check Weapon Enchants
+-- Helper: Check Weapon Enchants (Returns: hasEnchant, timeLeftInSeconds)
 function TankAudit_CheckWeapon()
-    local hasMainHand, _, _, _, _, _ = GetWeaponEnchantInfo()
-    if not hasMainHand then
-        return false -- Missing
+    -- GetWeaponEnchantInfo returns: hasMainHand, mainHandExpiration(ms), ..., hasOffHand, offHandExpiration(ms)
+    local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
+    
+    if hasMH then
+        local timeSeconds = (expMH or 0) / 1000
+        return true, timeSeconds
     end
-    return true -- Found
+    
+    if hasOH then
+        local timeSeconds = (expOH or 0) / 1000
+        return true, timeSeconds
+    end
+    
+    return false, 0
 end
 
 -- Helper: Check cache for spell (Instant Lookup)
@@ -286,7 +337,7 @@ function TankAudit_CheckStance(iconName)
         local texture, name, isActive = GetShapeshiftFormInfo(i)
         if isActive and texture then
             -- We check if the texture string contains our target icon name
-            if string.find(string.lower(texture), string.lower(iconName)) then
+            if _strfind(_strlower(texture), _strlower(iconName)) then
                 return true
             end
         end
@@ -295,9 +346,13 @@ function TankAudit_CheckStance(iconName)
 end
 
 -- Helper: Scan Weapon Tooltip for Specific Enchant Name (e.g. "Rockbiter")
+-- Returns: hasEnchant (boolean), timeLeft (number)
 function TankAudit_CheckSpecificEnchant(enchantName)
-    local hasEnchant = GetWeaponEnchantInfo()
-    if not hasEnchant then return false end
+    -- GetWeaponEnchantInfo returns: hasMainHand, mainHandExpiration(ms), ...
+    local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
+    
+    -- We primarily check Main Hand for Rockbiter
+    if not hasMH then return false, 0 end
     
     -- Initialize Scanner Tip if missing
     if not TA_TooltipScanner then
@@ -306,15 +361,17 @@ function TankAudit_CheckSpecificEnchant(enchantName)
     end
     
     TA_TooltipScanner:ClearLines()
-    TA_TooltipScanner:SetInventoryItem("player", 16) -- Main Hand
+    TA_TooltipScanner:SetInventoryItem("player", MAIN_HAND_SLOT) -- Main Hand
     
     for i=1, TA_TooltipScanner:NumLines() do
         local text = getglobal("TA_TooltipScannerTextLeft"..i):GetText()
-        if text and string.find(text, enchantName) then
-            return true
+        if text and _strfind(text, enchantName) then
+            -- Found it! Calculate seconds remaining
+            local timeLeft = (expMH or 0) / 1000
+            return true, timeLeft
         end
     end
-    return false
+    return false, 0
 end
 
 --- Helper: Cache Known Spells (Optimization)
@@ -329,7 +386,55 @@ function TankAudit_CacheSpells()
     end
 end
 
+-- Helper: Detect if a Prot Paladin is active by looking for Sanctuary on ANYONE
+function TankAudit_ScanForSanctuary()
+    -- Get the Sanc icons from our data table
+    local icons = TA_DATA.CLASSES["PALADIN"].GROUP["Blessing of Sanctuary"]
+    if not icons then return false end
+
+    -- Inner helper to check a specific unit
+    local function CheckUnit(unit)
+        local i = 1
+        while true do
+            -- UnitBuff returns texture, rank, index (1.12 API)
+            local texture = UnitBuff(unit, i)
+            if not texture then break end
+            
+            for _, validIcon in pairs(icons) do
+                if _strfind(_strlower(texture), _strlower(validIcon)) then
+                    return true -- Found it!
+                end
+            end
+            i = i + 1
+        end
+        return false
+    end
+
+    -- 1. Check Player (Fastest)
+    if CheckUnit("player") then return true end
+
+    -- 2. Check Raid/Party (Deep Scan)
+    -- We scan this every 3s. To save CPU, we return immediately upon finding one instance.
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        for i=1, numRaid do
+            if CheckUnit("raid"..i) then return true end
+        end
+    else
+        local numParty = GetNumPartyMembers()
+        for i=1, numParty do
+            if CheckUnit("party"..i) then return true end
+        end
+    end
+
+    return false
+end
+
 -- D. MAIN SCAN ROUTINE
+-- Main audit routine - scans all buffs and updates missing/expiring lists
+-- Checks self-buffs, group buffs, consumables, and healthstones
+-- Applies context-aware filtering (solo suppression, combat state, etc.)
+-- Updates TA_MISSING_BUFFS and TA_EXPIRING_BUFFS tables
 function TankAudit_RunBuffScan()
     if not TankAuditDB.enabled then 
         TankAudit_UpdateUI()
@@ -379,17 +484,22 @@ function TankAudit_RunBuffScan()
                     -- Standard Buff check works for Bear, but let's double check Stance bar for robustness
                     hasBuff = TankAudit_GetBuffStatus(iconList) or TankAudit_CheckStance("BearForm")
                 elseif name == "Rockbiter Weapon" then
-                    -- Special Tooltip Scan for Shamans
-                    hasBuff = TankAudit_CheckSpecificEnchant("Rockbiter")
+                    -- Special Tooltip Scan for Shamans (Now returns time)
+                    hasBuff, timeLeft = TankAudit_CheckSpecificEnchant("Rockbiter")
                 else
                     -- Standard Buff Scan
                     hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
                 end
 
+                -- Determine Warning Threshold
+                -- Default is 15s (BUFF_WARNING_SELF), but Rockbiter gets 60s
+                local warningThreshold = BUFF_WARNING_SELF
+                if name == "Rockbiter Weapon" then warningThreshold = 60 end
+
                 if not hasBuff then
-                    table.insert(TA_MISSING_BUFFS, name)
-                elseif timeLeft > 0 and timeLeft < 15 then
-                    table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
+                    _tinsert(TA_MISSING_BUFFS, name)
+                elseif timeLeft > 0 and timeLeft < warningThreshold then
+                    _tinsert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                 end
             end
         end
@@ -398,7 +508,7 @@ function TankAudit_RunBuffScan()
     -- 2. SMART VISIBILITY FILTER (Solo & Out of Combat)
     if isSolo and not inCombat then
         local hasEnemyTarget = UnitExists("target") and UnitCanAttack("player", "target") and not UnitIsDead("target")
-        local hasMissingSelfBuffs = (table.getn(TA_MISSING_BUFFS) > 0)
+        local hasMissingSelfBuffs = (_tgetn(TA_MISSING_BUFFS) > 0)
         
         if not (hasEnemyTarget and hasMissingSelfBuffs) then
             TA_MISSING_BUFFS = {}
@@ -408,7 +518,13 @@ function TankAudit_RunBuffScan()
         end
     end
 
-    -- 3. Group Buffs (No changes here)
+    -- 3. Group Buffs
+    if TA_ROSTER_INFO.CLASSES["PALADIN"] then
+        TA_HAS_PROT_PALADIN = TankAudit_ScanForSanctuary()
+    else
+        TA_HAS_PROT_PALADIN = false
+    end
+
     for class, data in pairs(TA_DATA.CLASSES) do
         local classCount = TA_ROSTER_INFO.CLASSES[class] or 0
         if TankAuditDB.checkBuffs and classCount > 0 and data.GROUP then
@@ -427,6 +543,11 @@ function TankAudit_RunBuffScan()
                         if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then 
                             shouldCheck = false 
                         end
+                    elseif name == "Blessing of Sanctuary" then
+                        -- Only ask for Sanc if we have PROOF a Prot Paladin exists
+                        if not TA_HAS_PROT_PALADIN then shouldCheck = false end
+                        -- Also respect the manual priority list
+                        if not validPaladinBuffs[name] then shouldCheck = false end
                     else
                         -- Blessing Check: Allow from any Raid Paladin, but respect Priority List
                         if not validPaladinBuffs[name] then 
@@ -444,9 +565,9 @@ function TankAudit_RunBuffScan()
                 if shouldCheck then
                     local hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
                     if not hasBuff then
-                        table.insert(TA_MISSING_BUFFS, name)
-                    elseif timeLeft > 0 and timeLeft < 120 then
-                        table.insert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
+                        _tinsert(TA_MISSING_BUFFS, name)
+                    elseif timeLeft > 0 and timeLeft < BUFF_WARNING_GROUP then
+                        _tinsert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                     end
                 end
             end
@@ -458,25 +579,39 @@ function TankAudit_RunBuffScan()
     local checkConsumables = TankAuditDB.checkFood and not isSolo
     
     if checkConsumables then
-        if not TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"]) then
-            table.insert(TA_MISSING_BUFFS, "Well Fed")
+        -- MODIFIED: Capture time left
+        local hasFood, foodTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
+        
+        if not hasFood then
+            _tinsert(TA_MISSING_BUFFS, "Well Fed")
+        elseif foodTime > 0 and foodTime < 60 then 
+            -- NEW: Alert if expiring in 1 minute or less
+            _tinsert(TA_EXPIRING_BUFFS, { name = "Well Fed", time = foodTime })
         end
         
         -- Generic Weapon Check (for non-Shaman/non-Druid)
         if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then 
-            if not TankAudit_CheckWeapon() then table.insert(TA_MISSING_BUFFS, "Weapon Buff") end
+            local hasWep, wepTime = TankAudit_CheckWeapon()
+            if not hasWep then 
+                _tinsert(TA_MISSING_BUFFS, "Weapon Buff") 
+            elseif wepTime > 0 and wepTime <= 60 then
+                _tinsert(TA_EXPIRING_BUFFS, { name = "Weapon Buff", time = wepTime })
+            end
         end
     end
 
     -- 5. Healthstone
     if TankAuditDB.checkHealthstone and not TankAudit_CheckHealthstone() then
-        table.insert(TA_MISSING_BUFFS, "Healthstone")
+        _tinsert(TA_MISSING_BUFFS, "Healthstone")
     end
 
     TankAudit_UpdateUI()
 end
 
 -- UI Helpers
+-- Create reusable button pool for displaying audit alerts
+-- Initializes all buttons with proper sizing, fonts, and references
+-- Called once during addon initialization
 function TankAudit_CreateButtonPool()
     for i = 1, TA_MAX_BUTTONS do
         local btn = CreateFrame("Button", "TankAudit_Btn_"..i, UIParent, "TankAudit_RequestBtnTemplate")
@@ -511,6 +646,9 @@ function TankAudit_CreateButtonPool()
     end
 end
 
+-- Update button timers and visual states every frame
+-- Refreshes countdown text and icon desaturation for expiring buffs
+-- Called by OnUpdate to keep timers smooth
 function TankAudit_UpdateButtonVisuals()
     local currentTime = GetTime()
     
@@ -530,15 +668,10 @@ function TankAudit_UpdateButtonVisuals()
                 -- Timer running: Ensure icon is colored
                 iconObj:SetDesaturated(0)
                 
-                local timeStr = ""
-                if timeLeft > 60 then
-                    timeStr = math.ceil(timeLeft / 60) .. "m"
-                else
-                    timeStr = math.ceil(timeLeft)
-                end
+                local timeStr = FormatTimeLeft(timeLeft)
                 
                 -- Red text for < 10s, Yellow for > 10s
-                if timeLeft < 10 then
+                if timeLeft < TIMER_WARNING_THRESHOLD then
                     textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
                 else
                     textObj:SetText("|cFFFFFF00" .. timeStr .. "|r")
@@ -548,6 +681,9 @@ function TankAudit_UpdateButtonVisuals()
     end
 end
 
+-- Move a Paladin blessing priority up or down in the list
+-- @param index (number) - Current position in priority list (1-4)
+-- @param direction (number) - Move direction: -1 (up) or 1 (down)
 function TankAudit_MovePriority(index, direction)
     -- Direction: -1 (Up), 1 (Down)
     local newIndex = index + direction
@@ -566,6 +702,9 @@ function TankAudit_MovePriority(index, direction)
     TankAudit_Config_OnShow() -- Re-runs layout/text update
 end
 
+-- Rebuild and position all audit buttons based on current scan results
+-- Handles scaling, positioning, test mode, and button state management
+-- Creates centered horizontal row of icons showing missing/expiring buffs
 function TankAudit_UpdateUI()
     -- 1. Get current scale 
     local scale = TankAuditDB.scale or 1.0
@@ -583,8 +722,8 @@ function TankAudit_UpdateUI()
     end
 
     -- 2. Count active buttons
-    local numMissing = table.getn(renderMissing)
-    local numExpiring = table.getn(renderExpiring)
+    local numMissing = _tgetn(renderMissing)
+    local numExpiring = _tgetn(renderExpiring)
     local totalActive = numMissing + numExpiring
 
     -- 3. Calculate starting Left Edge (Base Coordinates)
@@ -597,6 +736,11 @@ function TankAudit_UpdateUI()
     local usedButtons = 0
     local index = 1
 
+-- Configure a single button to display a buff alert
+-- Handles icon, text, color, scaling, and positioning
+-- @param buffName (string) - Name of the buff to display
+-- @param isExpiring (boolean) - True if buff is expiring, false if missing
+-- @param timeLeft (number) - Seconds remaining (0 if missing)
     local function SetupButton(buffName, isExpiring, timeLeft)
         if index > TA_MAX_BUTTONS then return end
         
@@ -622,14 +766,12 @@ function TankAudit_UpdateUI()
             iconObj:SetDesaturated(0)
             local newExpiry = GetTime() + timeLeft
             if not btn.expiresAt then btn.expiresAt = newExpiry
-            elseif math.abs(newExpiry - btn.expiresAt) > 2 then btn.expiresAt = newExpiry end
+            elseif _mathabs(newExpiry - btn.expiresAt) > 2 then btn.expiresAt = newExpiry end
 
             local displayTime = btn.expiresAt - GetTime()
-            local timeStr = ""
-            if displayTime > 60 then timeStr = math.ceil(displayTime / 60) .. "m"
-            else timeStr = math.ceil(displayTime) end
+            local timeStr = FormatTimeLeft(displayTime)
             
-            if displayTime < 10 then textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
+            if displayTime < TIMER_WARNING_THRESHOLD then textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
             else textObj:SetText("|cFFFFFF00" .. timeStr .. "|r") end
             textObj:Show()
         else
@@ -662,6 +804,10 @@ function TankAudit_UpdateUI()
     end
 end
 
+-- Look up the icon texture path for a given buff name
+-- Searches class buffs, consumables, and hardcoded entries
+-- @param buffName (string) - Name of the buff/item
+-- @return (string) - Full texture path (e.g., "Interface\\Icons\\Spell_Nature_Thorns")
 function TankAudit_GetIconForName(buffName)
     -- 1. Check Class Buffs
     for class, data in pairs(TA_DATA.CLASSES) do
@@ -684,21 +830,29 @@ function TankAudit_GetIconForName(buffName)
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
+-- Handle click events on audit buttons
+-- Behavior depends on buff type:
+--   • Self-buffs: Auto-cast the spell
+--   • Consumables: Open bags with reminder message
+--   • Group buffs: Send request message to party/raid chat
+-- Includes throttling to prevent spam
+-- @param btn (frame) - The button that was clicked
+-- Handle click events on audit buttons
 function TankAudit_RequestButton_OnClick(btn)
     local buffName = btn.buffName
     if not buffName then return end
 
-    -- 1. HANDLE CONFIG TEST BUTTONS (NEW)
-    if string.find(buffName, "Test Button") then
-        local msg = string.format("Message from %s", buffName)
-        
-        -- Use DEFAULT_CHAT_FRAME to print locally instead of annoying the party/raid
+    -- 1. HANDLE CONFIG TEST BUTTONS
+    if _strfind(buffName, "Test Button") then
+        local msg = _strformat("Message from %s", buffName)
         DEFAULT_CHAT_FRAME:AddMessage(msg) 
         return
     end
 
     -- 2. HANDLE CONSUMABLES (Open Bags)
-    if buffName == "Well Fed" or buffName == "Weapon Buff" or buffName == "Healthstone" then
+    -- REMOVED: "Healthstone" from this check. 
+    -- If we are missing a HS, we need to ask for one, not look in empty bags.
+    if buffName == "Well Fed" or buffName == "Weapon Buff" then
         local bagsOpen = false
         if ContainerFrame1 and ContainerFrame1:IsVisible() then
             bagsOpen = true
@@ -712,8 +866,6 @@ function TankAudit_RequestButton_OnClick(btn)
             DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FOOD)
         elseif buffName == "Weapon Buff" then
             DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_WEAPON)
-        elseif buffName == "Healthstone" then
-            SendChatMessage(string.format(TA_STRINGS.MSG_NEED_HS), "SAY")
         end
         return
     end
@@ -730,12 +882,15 @@ function TankAudit_RequestButton_OnClick(btn)
     end
 
     -- 4. STANDARD GROUP REQUEST (Chat Message)
-    if btn.lastClick and (GetTime() - btn.lastClick) < 5 then
+    
+    -- Throttle check
+    if btn.lastClick and (GetTime() - btn.lastClick) < REQUEST_THROTTLE then
         DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_WAIT_THROTTLE)
         return
     end
     btn.lastClick = GetTime()
 
+    -- Dynamic Channel Selection
     local channel = "SAY"
     if GetNumRaidMembers() > 0 then channel = "RAID"
     elseif GetNumPartyMembers() > 0 then channel = "PARTY"
@@ -744,14 +899,16 @@ function TankAudit_RequestButton_OnClick(btn)
     local msg = ""
     if btn.isExpiring then
         local timeText = getglobal(btn:GetName().."Text"):GetText() or "soon"
-        msg = string.format(TA_STRINGS.MSG_BUFF_EXPIRING, buffName, timeText)
+        msg = _strformat(TA_STRINGS.MSG_BUFF_EXPIRING, buffName, timeText)
     else
+        -- Check for RP Messages
         if TA_RP_MESSAGES[buffName] then
             local options = TA_RP_MESSAGES[buffName]
-            local choice = math.random(1, table.getn(options))
+            local choice = _mathrandom(1, _tgetn(options))
             msg = options[choice]
         else
-            msg = string.format(TA_STRINGS.MSG_NEED_BUFF, buffName)
+            -- Fallback default message
+            msg = _strformat(TA_STRINGS.MSG_NEED_BUFF, buffName)
         end
     end
     SendChatMessage(msg, channel)
@@ -760,7 +917,7 @@ end
 function TankAudit_DebugBuffs()
     DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[Audit] Current Buffs:|r")
     local i = 0
-    while i < 32 do
+    while i < MAX_BUFF_SLOTS do
         local buffIndex = GetPlayerBuff(i, "HELPFUL")
         if buffIndex < 0 then break end
         local texture = GetPlayerBuffTexture(buffIndex)
@@ -769,6 +926,8 @@ function TankAudit_DebugBuffs()
     end
 end
 
+-- Initialize saved variables with default values if missing
+-- Called on PLAYER_ENTERING_WORLD to ensure TankAuditDB is populated
 function TankAudit_InitializeDefaults()
     if not TankAuditDB then
         TankAuditDB = {}
@@ -793,6 +952,9 @@ function TankAudit_UpdateScale()
     end
 end
 
+-- Update the anchor position and sync with config UI
+-- @param x (number) - Horizontal offset from screen center
+-- @param y (number) - Vertical offset from screen center
 function TankAudit_SetPosition(x, y)
     -- Update Database
     TankAuditDB.x = x
@@ -842,7 +1004,7 @@ function TankAudit_Config_OnShow(frame)
     if sldScale then
         sldScale:SetValue(TankAuditDB.scale)
         -- NEW: Force the label to update immediately on show
-        getglobal(sldScale:GetName().."Text"):SetText(string.format("Button Scale: %.1f", TankAuditDB.scale))
+        getglobal(sldScale:GetName().."Text"):SetText(_strformat("Button Scale: %.1f", TankAuditDB.scale))
     end
 
     if TankAudit_InputX then TankAudit_InputX:SetNumber(TankAuditDB.x) end
