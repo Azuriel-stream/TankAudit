@@ -43,11 +43,12 @@ TankAudit scans your character, your inventory, and your group roster to determi
 The addon automatically detects your class and tracks essential tanking mechanics:
 * **Self Buffs & Stances:** Alerts you if you are missing critical maintenance buffs (e.g., *Righteous Fury*, *Lightning Shield*) or are in the wrong Stance/Form for tanking (e.g., *Defensive Stance*, *Bear Form*).
 * **Group Utility:** Monitors powerful buffs provided by your party members (e.g., *Fortitude*, *Mark of the Wild*, *Blessings*, *Thorns*) and lets you request them with a click.
-* **Smart Filtering:** Automatically hides alerts for buffs you cannot receive (e.g., prevents Paladin Aura alerts if the Paladin is in a different subgroup).
+* **Smart Filtering:** * Automatically hides alerts for buffs you cannot receive (e.g., prevents Paladin Aura alerts if the Paladin is in a different subgroup).
+    * **Passive Detection:** Intelligently detects if a Protection Paladin is present by watching for *Blessing of Sanctuary* on teammates before asking for it.
 
 ### General / Consumables
-* **Food:** Checks for "Well Fed" status (suppressed when solo).
-* **Weapon Buffs:** Checks for Sharpening Stones / Wizard Oils / Rockbiter (suppressed when solo).
+* **Food:** Checks for "Well Fed" status (suppressed when solo) and warns when < 60s remains.
+* **Weapon Buffs:** Checks for Sharpening Stones / Wizard Oils / Rockbiter (suppressed when solo) and warns when < 60s remains.
 * **Healthstone:** Checks your bags if a Warlock is present in the group/raid.
 
 ## Tips
