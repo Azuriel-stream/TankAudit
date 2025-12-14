@@ -1,7 +1,7 @@
 -- TankAudit.lua
 
 -- 1. Constants & Variables
-local TA_VERSION = "1.0.0"
+local TA_VERSION = "1.1.1"
 local TA_PLAYER_CLASS = nil
 local TA_IS_TANK = false
 -- State Variables
@@ -305,13 +305,22 @@ function TankAudit_CheckHealthstone()
     return false -- Missing
 end
 
--- Helper: Check Weapon Enchants
+-- Helper: Check Weapon Enchants (Returns: hasEnchant, timeLeftInSeconds)
 function TankAudit_CheckWeapon()
-    local hasMainHand, _, _, _, _, _ = GetWeaponEnchantInfo()
-    if not hasMainHand then
-        return false -- Missing
+    -- GetWeaponEnchantInfo returns: hasMainHand, mainHandExpiration(ms), ..., hasOffHand, offHandExpiration(ms)
+    local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
+    
+    if hasMH then
+        local timeSeconds = (expMH or 0) / 1000
+        return true, timeSeconds
     end
-    return true -- Found
+    
+    if hasOH then
+        local timeSeconds = (expOH or 0) / 1000
+        return true, timeSeconds
+    end
+    
+    return false, 0
 end
 
 -- Helper: Check cache for spell (Instant Lookup)
@@ -336,9 +345,13 @@ function TankAudit_CheckStance(iconName)
 end
 
 -- Helper: Scan Weapon Tooltip for Specific Enchant Name (e.g. "Rockbiter")
+-- Returns: hasEnchant (boolean), timeLeft (number)
 function TankAudit_CheckSpecificEnchant(enchantName)
-    local hasEnchant = GetWeaponEnchantInfo()
-    if not hasEnchant then return false end
+    -- GetWeaponEnchantInfo returns: hasMainHand, mainHandExpiration(ms), ...
+    local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
+    
+    -- We primarily check Main Hand for Rockbiter
+    if not hasMH then return false, 0 end
     
     -- Initialize Scanner Tip if missing
     if not TA_TooltipScanner then
@@ -352,10 +365,12 @@ function TankAudit_CheckSpecificEnchant(enchantName)
     for i=1, TA_TooltipScanner:NumLines() do
         local text = getglobal("TA_TooltipScannerTextLeft"..i):GetText()
         if text and _strfind(text, enchantName) then
-            return true
+            -- Found it! Calculate seconds remaining
+            local timeLeft = (expMH or 0) / 1000
+            return true, timeLeft
         end
     end
-    return false
+    return false, 0
 end
 
 --- Helper: Cache Known Spells (Optimization)
@@ -424,16 +439,21 @@ function TankAudit_RunBuffScan()
                     -- Standard Buff check works for Bear, but let's double check Stance bar for robustness
                     hasBuff = TankAudit_GetBuffStatus(iconList) or TankAudit_CheckStance("BearForm")
                 elseif name == "Rockbiter Weapon" then
-                    -- Special Tooltip Scan for Shamans
-                    hasBuff = TankAudit_CheckSpecificEnchant("Rockbiter")
+                    -- Special Tooltip Scan for Shamans (Now returns time)
+                    hasBuff, timeLeft = TankAudit_CheckSpecificEnchant("Rockbiter")
                 else
                     -- Standard Buff Scan
                     hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
                 end
 
+                -- Determine Warning Threshold
+                -- Default is 15s (BUFF_WARNING_SELF), but Rockbiter gets 60s
+                local warningThreshold = BUFF_WARNING_SELF
+                if name == "Rockbiter Weapon" then warningThreshold = 60 end
+
                 if not hasBuff then
                     _tinsert(TA_MISSING_BUFFS, name)
-                elseif timeLeft > 0 and timeLeft < BUFF_WARNING_SELF then
+                elseif timeLeft > 0 and timeLeft < warningThreshold then
                     _tinsert(TA_EXPIRING_BUFFS, { name = name, time = timeLeft })
                 end
             end
@@ -503,13 +523,24 @@ function TankAudit_RunBuffScan()
     local checkConsumables = TankAuditDB.checkFood and not isSolo
     
     if checkConsumables then
-        if not TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"]) then
+        -- MODIFIED: Capture time left
+        local hasFood, foodTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
+        
+        if not hasFood then
             _tinsert(TA_MISSING_BUFFS, "Well Fed")
+        elseif foodTime > 0 and foodTime < 60 then 
+            -- NEW: Alert if expiring in 1 minute or less
+            _tinsert(TA_EXPIRING_BUFFS, { name = "Well Fed", time = foodTime })
         end
         
         -- Generic Weapon Check (for non-Shaman/non-Druid)
         if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then 
-            if not TankAudit_CheckWeapon() then _tinsert(TA_MISSING_BUFFS, "Weapon Buff") end
+            local hasWep, wepTime = TankAudit_CheckWeapon()
+            if not hasWep then 
+                _tinsert(TA_MISSING_BUFFS, "Weapon Buff") 
+            elseif wepTime > 0 and wepTime <= 60 then
+                _tinsert(TA_EXPIRING_BUFFS, { name = "Weapon Buff", time = wepTime })
+            end
         end
     end
 
