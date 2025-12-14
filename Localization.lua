@@ -97,9 +97,11 @@ TA_RP_MESSAGES = {
 
     -- WARLOCK (Healthstone)
     ["Healthstone"] = {
-        "Warlock, I require a Healthstone!",
-        "The darkness calls... and it tells me I need a cookie (Healthstone)!",
-        "My bag feels light without a Healthstone. Warlock?"
+        "Summoning cookie, please!",
+        "I require a green rock, Warlock.",
+        "The tank requires a soul shard... in cookie form.",
+        "Healthstone me!",
+        "My bags feel empty without a Healthstone."
     },
 
     -- FALLBACK

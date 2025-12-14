@@ -781,21 +781,22 @@ end
 --   • Group buffs: Send request message to party/raid chat
 -- Includes throttling to prevent spam
 -- @param btn (frame) - The button that was clicked
+-- Handle click events on audit buttons
 function TankAudit_RequestButton_OnClick(btn)
     local buffName = btn.buffName
     if not buffName then return end
 
-    -- 1. HANDLE CONFIG TEST BUTTONS (NEW)
+    -- 1. HANDLE CONFIG TEST BUTTONS
     if _strfind(buffName, "Test Button") then
         local msg = _strformat("Message from %s", buffName)
-        
-        -- Use DEFAULT_CHAT_FRAME to print locally instead of annoying the party/raid
         DEFAULT_CHAT_FRAME:AddMessage(msg) 
         return
     end
 
     -- 2. HANDLE CONSUMABLES (Open Bags)
-    if buffName == "Well Fed" or buffName == "Weapon Buff" or buffName == "Healthstone" then
+    -- REMOVED: "Healthstone" from this check. 
+    -- If we are missing a HS, we need to ask for one, not look in empty bags.
+    if buffName == "Well Fed" or buffName == "Weapon Buff" then
         local bagsOpen = false
         if ContainerFrame1 and ContainerFrame1:IsVisible() then
             bagsOpen = true
@@ -809,8 +810,6 @@ function TankAudit_RequestButton_OnClick(btn)
             DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FOOD)
         elseif buffName == "Weapon Buff" then
             DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_WEAPON)
-        elseif buffName == "Healthstone" then
-            SendChatMessage(_strformat(TA_STRINGS.MSG_NEED_HS), "SAY")
         end
         return
     end
@@ -827,12 +826,15 @@ function TankAudit_RequestButton_OnClick(btn)
     end
 
     -- 4. STANDARD GROUP REQUEST (Chat Message)
+    
+    -- Throttle check
     if btn.lastClick and (GetTime() - btn.lastClick) < REQUEST_THROTTLE then
         DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_WAIT_THROTTLE)
         return
     end
     btn.lastClick = GetTime()
 
+    -- Dynamic Channel Selection
     local channel = "SAY"
     if GetNumRaidMembers() > 0 then channel = "RAID"
     elseif GetNumPartyMembers() > 0 then channel = "PARTY"
@@ -843,11 +845,13 @@ function TankAudit_RequestButton_OnClick(btn)
         local timeText = getglobal(btn:GetName().."Text"):GetText() or "soon"
         msg = _strformat(TA_STRINGS.MSG_BUFF_EXPIRING, buffName, timeText)
     else
+        -- Check for RP Messages
         if TA_RP_MESSAGES[buffName] then
             local options = TA_RP_MESSAGES[buffName]
             local choice = _mathrandom(1, _tgetn(options))
             msg = options[choice]
         else
+            -- Fallback default message
             msg = _strformat(TA_STRINGS.MSG_NEED_BUFF, buffName)
         end
     end
