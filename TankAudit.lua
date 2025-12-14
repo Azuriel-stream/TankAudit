@@ -10,6 +10,7 @@ local TA_MISSING_BUFFS = {}  -- Stores result of scan
 local TA_EXPIRING_BUFFS = {} -- Stores result of scan
 local TA_SCAN_QUEUED = false  -- NEW: Track if a scan is waiting
 local TA_KNOWN_SPELLS = {}
+local TA_HAS_PROT_PALADIN = false
 -- UI Variables
 local TA_BUTTON_POOL = {}
 local TA_MAX_BUTTONS = 16
@@ -385,6 +386,50 @@ function TankAudit_CacheSpells()
     end
 end
 
+-- Helper: Detect if a Prot Paladin is active by looking for Sanctuary on ANYONE
+function TankAudit_ScanForSanctuary()
+    -- Get the Sanc icons from our data table
+    local icons = TA_DATA.CLASSES["PALADIN"].GROUP["Blessing of Sanctuary"]
+    if not icons then return false end
+
+    -- Inner helper to check a specific unit
+    local function CheckUnit(unit)
+        local i = 1
+        while true do
+            -- UnitBuff returns texture, rank, index (1.12 API)
+            local texture = UnitBuff(unit, i)
+            if not texture then break end
+            
+            for _, validIcon in pairs(icons) do
+                if _strfind(_strlower(texture), _strlower(validIcon)) then
+                    return true -- Found it!
+                end
+            end
+            i = i + 1
+        end
+        return false
+    end
+
+    -- 1. Check Player (Fastest)
+    if CheckUnit("player") then return true end
+
+    -- 2. Check Raid/Party (Deep Scan)
+    -- We scan this every 3s. To save CPU, we return immediately upon finding one instance.
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        for i=1, numRaid do
+            if CheckUnit("raid"..i) then return true end
+        end
+    else
+        local numParty = GetNumPartyMembers()
+        for i=1, numParty do
+            if CheckUnit("party"..i) then return true end
+        end
+    end
+
+    return false
+end
+
 -- D. MAIN SCAN ROUTINE
 -- Main audit routine - scans all buffs and updates missing/expiring lists
 -- Checks self-buffs, group buffs, consumables, and healthstones
@@ -473,7 +518,13 @@ function TankAudit_RunBuffScan()
         end
     end
 
-    -- 3. Group Buffs (No changes here)
+    -- 3. Group Buffs
+    if TA_ROSTER_INFO.CLASSES["PALADIN"] then
+        TA_HAS_PROT_PALADIN = TankAudit_ScanForSanctuary()
+    else
+        TA_HAS_PROT_PALADIN = false
+    end
+
     for class, data in pairs(TA_DATA.CLASSES) do
         local classCount = TA_ROSTER_INFO.CLASSES[class] or 0
         if TankAuditDB.checkBuffs and classCount > 0 and data.GROUP then
@@ -492,6 +543,11 @@ function TankAudit_RunBuffScan()
                         if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then 
                             shouldCheck = false 
                         end
+                    elseif name == "Blessing of Sanctuary" then
+                        -- Only ask for Sanc if we have PROOF a Prot Paladin exists
+                        if not TA_HAS_PROT_PALADIN then shouldCheck = false end
+                        -- Also respect the manual priority list
+                        if not validPaladinBuffs[name] then shouldCheck = false end
                     else
                         -- Blessing Check: Allow from any Raid Paladin, but respect Priority List
                         if not validPaladinBuffs[name] then 
