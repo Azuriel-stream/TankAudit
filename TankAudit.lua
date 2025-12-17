@@ -462,43 +462,55 @@ end
 -- D. MAIN SCAN ROUTINE
 
 -- Helper: Scan for actionable Debuffs
--- Checks if player has a debuff that a group member can dispel
+-- Checks if player has a debuff that a SPECIFIC group member can dispel
 function TankAudit_ScanDebuffs()
     TA_ACTIVE_DEBUFFS = {}
     
-    -- If we are solo, we generally can't be dispelled by others (unless we are a hybrid)
-    -- But per requirements: "scans party/raid roster". 
-    -- If solo, we check if WE can dispel ourselves.
-    
     local i = 0
     while true do
-        -- GetPlayerBuff(i, "HARMFUL") returns the index of the i-th debuff
         local buffIndex = GetPlayerBuff(i, "HARMFUL")
         if buffIndex < 0 then break end
         
-        local texture, applications, debuffType = UnitDebuff("player", i + 1) -- UnitDebuff uses 1-based index
+        local texture, applications, debuffType = UnitDebuff("player", i + 1)
         
         if debuffType and texture then
-            -- Check if anyone in roster can handle this type
             local canDispel = false
             
-            -- Check the Dispel Map
-            local capableClasses = TA_DATA.DISPEL_MAP[debuffType]
-            if capableClasses then
-                for class, _ in pairs(capableClasses) do
-                    if TA_ROSTER_INFO.CLASSES[class] and TA_ROSTER_INFO.CLASSES[class] > 0 then
-                        canDispel = true
-                        break
+            -- 1. Check Self (Solo or Group)
+            if TankAudit_CanUnitDispel("player", debuffType) then
+                canDispel = true
+            else
+                -- 2. Check Group (if we can't do it ourselves)
+                local numParty = GetNumPartyMembers()
+                local numRaid = GetNumRaidMembers()
+                
+                if numRaid > 0 then
+                    -- Optimization: For Raid, we assume competence and just check if the class exists
+                    -- (As per your request to not worry about detailed raid checks)
+                    if TA_DATA.DISPEL_RULES[debuffType] then
+                        for class, _ in pairs(TA_DATA.DISPEL_RULES[debuffType]) do
+                            if TA_ROSTER_INFO.CLASSES[class] and TA_ROSTER_INFO.CLASSES[class] > 0 then
+                                canDispel = true
+                                break
+                            end
+                        end
+                    end
+                elseif numParty > 0 then
+                    -- Detailed Party Scan
+                    for p = 1, numParty do
+                        if TankAudit_CanUnitDispel("party"..p, debuffType) then
+                            canDispel = true
+                            break
+                        end
                     end
                 end
             end
             
             if canDispel then
-                -- Store it! We need the buffIndex for the tooltip later
                 _tinsert(TA_ACTIVE_DEBUFFS, { 
-                    name = debuffType, -- Display "Magic", "Curse" etc. or we could use texture name
-                    texture = texture,
-                    type = debuffType,
+                    name = debuffType, 
+                    texture = texture, 
+                    type = debuffType, 
                     index = buffIndex 
                 })
             end
@@ -527,6 +539,42 @@ function TankAudit_GetSpellLink(buffName)
     -- Color: 71d5ff (Spell Blue)
     -- |Hspell:ID|h[Name]|h
     return "|cff71d5ff|Hspell:" .. spellID .. "|h[" .. buffName .. "]|h|r"
+end
+
+-- Helper: Check if a specific unit is capable of removing a debuff type
+-- Uses "Known Spells" for player, and "Level" for party members
+function TankAudit_CanUnitDispel(unit, debuffType)
+    local _, class = UnitClass(unit)
+    if not class then return false end
+    
+    -- 1. Check if this class can EVER handle this debuff
+    local rules = TA_DATA.DISPEL_RULES[debuffType]
+    if not rules or not rules[class] then return false end
+    
+    local requirement = rules[class]
+    
+    -- 2. "Smart" Check
+    if UnitIsUnit(unit, "player") then
+        -- SELF: Strict check. Do we actually know the spell?
+        -- We check the English name against our icon cache via the helper we made earlier
+        -- NOTE: We need the icon for this to work perfectly, but for now checking the name 
+        -- via a new helper or assuming the player trained if they are high enough level is safer.
+        -- Let's stick to the Level check for consistency, OR use the Spellbook if we have the data.
+        
+        -- Robust fallback: Check Level. If we are high enough level, we SHOULD have it.
+        local level = UnitLevel(unit)
+        return level >= requirement.level
+    else
+        -- PARTY: Heuristic check. Are they high enough level?
+        local level = UnitLevel(unit)
+        
+        -- Note: UnitLevel returns -1 for high level mobs, but usually returns correct # for party.
+        -- If 0 or -1 (unlikely in party), we assume they are high enough.
+        if level and level > 0 then
+            return level >= requirement.level
+        end
+        return true -- Assume yes if level is unknown (safe fallback)
+    end
 end
 
 -- Main audit routine - scans all buffs and updates missing/expiring lists

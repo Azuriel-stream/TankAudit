@@ -76,12 +76,26 @@ TA_DATA = {
         }
     },
 
-    -- 3. DISPEL CAPABILITIES (1.12)
-    -- Maps Debuff Type -> List of Classes that can remove it
-    DISPEL_MAP = {
-        ["Magic"]   = { PRIEST = true, PALADIN = true },
-        ["Curse"]   = { MAGE = true, DRUID = true },
-        ["Poison"]  = { DRUID = true, PALADIN = true, SHAMAN = true },
-        ["Disease"] = { PRIEST = true, PALADIN = true, SHAMAN = true }
+    -- 3. DISPEL RULES (1.12)
+    -- Mapping: Debuff Type -> List of Classes -> Requirements
+    DISPEL_RULES = {
+        ["Magic"] = {
+            PRIEST = { level = 18, spell = "Dispel Magic" },
+            PALADIN = { level = 42, spell = "Cleanse" }
+        },
+        ["Curse"] = {
+            MAGE = { level = 18, spell = "Remove Lesser Curse" },
+            DRUID = { level = 24, spell = "Remove Curse" }
+        },
+        ["Poison"] = {
+            DRUID = { level = 14, spell = "Cure Poison" },
+            PALADIN = { level = 8, spell = "Purify" }, -- Cleanse (42) also works, but Purify is baseline
+            SHAMAN = { level = 16, spell = "Cure Poison" }
+        },
+        ["Disease"] = {
+            PRIEST = { level = 14, spell = "Cure Disease" },
+            PALADIN = { level = 8, spell = "Purify" },
+            SHAMAN = { level = 22, spell = "Cure Disease" }
+        }
     }
 }
