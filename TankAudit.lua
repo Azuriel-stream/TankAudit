@@ -11,12 +11,14 @@ local TA_EXPIRING_BUFFS = {} -- Stores result of scan
 local TA_SCAN_QUEUED = false  -- NEW: Track if a scan is waiting
 local TA_KNOWN_SPELLS = {}
 local TA_HAS_PROT_PALADIN = false
+local TA_ACTIVE_DEBUFFS = {} -- Stores debuffs that need removal
 -- UI Variables
 local TA_BUTTON_POOL = {}
 local TA_MAX_BUTTONS = 16
 local TA_BUTTON_SIZE = 30
 local TA_BUTTON_SPACING = 2
 local TA_FRAME_ANCHOR = "CENTER" -- Default position
+local TA_TooltipScanner = nil
 -- Timers
 local timeSinceLastScan = 0
 local SCAN_INTERVAL = 3      -- UPDATED: Faster checks (was 15)
@@ -324,10 +326,20 @@ function TankAudit_CheckWeapon()
     return false, 0
 end
 
--- Helper: Check cache for spell (Instant Lookup)
-function TankAudit_HasSpell(spellName)
-    -- We simply ask: Is this name in our 'Known Spells' table?
-    return TA_KNOWN_SPELLS[spellName]
+-- Helper: Check cache for spell by Icon Texture (Locale Independent)
+-- @param iconList (table) - List of icon names (e.g. {"Ability_Warrior_BattleShout"})
+function TankAudit_HasSpell(iconList)
+    if not iconList or type(iconList) ~= "table" then return false end
+    
+    for _, iconName in pairs(iconList) do
+        -- Construct the standard path (lowercase for matching)
+        -- We assume standard WoW icon path structure
+        local path = "interface\\icons\\" .. _strlower(iconName)
+        if TA_KNOWN_SPELLS[path] then
+            return true
+        end
+    end
+    return false
 end
 
 -- Helper: Check Stance/Form by Icon Name (Works for Warrior/Druid)
@@ -350,40 +362,75 @@ end
 function TankAudit_CheckSpecificEnchant(enchantName)
     -- GetWeaponEnchantInfo returns: hasMainHand, mainHandExpiration(ms), ...
     local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
-    
+
     -- We primarily check Main Hand for Rockbiter
     if not hasMH then return false, 0 end
-    
-    -- Initialize Scanner Tip if missing
+
+    -- Initialize Scanner Tip if missing (using local variable)
     if not TA_TooltipScanner then
-        CreateFrame("GameTooltip", "TA_TooltipScanner", nil, "GameTooltipTemplate")
+        -- We create it without a name (arg 2 is nil) to avoid global pollution, 
+        -- but we need to assign it to our local variable.
+        TA_TooltipScanner = CreateFrame("GameTooltip", "TA_TooltipScanner_Private", nil, "GameTooltipTemplate")
         TA_TooltipScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
     end
-    
+
     TA_TooltipScanner:ClearLines()
     TA_TooltipScanner:SetInventoryItem("player", MAIN_HAND_SLOT) -- Main Hand
-    
+
     for i=1, TA_TooltipScanner:NumLines() do
-        local text = getglobal("TA_TooltipScannerTextLeft"..i):GetText()
-        if text and _strfind(text, enchantName) then
-            -- Found it! Calculate seconds remaining
-            local timeLeft = (expMH or 0) / 1000
-            return true, timeLeft
+        -- We must dynamically get the text line. 
+        -- Since we named the frame "TA_TooltipScanner_Private", the regions are named similarly.
+        local lineObj = getglobal("TA_TooltipScanner_PrivateTextLeft"..i)
+        if lineObj then
+            local text = lineObj:GetText()
+            if text and _strfind(text, enchantName) then
+                -- Found it! Calculate seconds remaining
+                local timeLeft = (expMH or 0) / 1000
+                return true, timeLeft
+            end
         end
     end
+
     return false, 0
 end
 
---- Helper: Cache Known Spells (Optimization)
+-- Helper: Cache Known Spells by Texture (Optimization)
+-- Stores all known spell icons as keys: TA_KNOWN_SPELLS["interface\icons\my_icon"] = true
 function TankAudit_CacheSpells()
     TA_KNOWN_SPELLS = {} -- Clear cache
     local i = 1
     while true do
+       -- GetSpellName returns (name, rank) - we don't need name anymore for logic
        local name, rank = GetSpellName(i, "spell")
        if not name then break end
-       TA_KNOWN_SPELLS[name] = true
+       
+       -- GetSpellTexture returns the full texture path (e.g. "Interface\Icons\Ability_Warrior_BattleShout")
+       local texture = GetSpellTexture(i, "spell")
+       if texture then
+           -- Store as lowercase to avoid case-sensitivity issues
+           TA_KNOWN_SPELLS[_strlower(texture)] = true
+       end
        i = i + 1
     end
+end
+
+-- Helper: Inner function to check a specific unit for Sanctuary icons
+-- Moved outside to avoid closure creation overhead
+local function TA_CheckUnitForSanctuary(unit, icons)
+    local i = 1
+    while true do
+        -- UnitBuff returns texture, rank, index (1.12 API)
+        local texture = UnitBuff(unit, i)
+        if not texture then break end
+
+        for _, validIcon in pairs(icons) do
+            if _strfind(_strlower(texture), _strlower(validIcon)) then
+                return true -- Found it!
+            end
+        end
+        i = i + 1
+    end
+    return false
 end
 
 -- Helper: Detect if a Prot Paladin is active by looking for Sanctuary on ANYONE
@@ -392,38 +439,20 @@ function TankAudit_ScanForSanctuary()
     local icons = TA_DATA.CLASSES["PALADIN"].GROUP["Blessing of Sanctuary"]
     if not icons then return false end
 
-    -- Inner helper to check a specific unit
-    local function CheckUnit(unit)
-        local i = 1
-        while true do
-            -- UnitBuff returns texture, rank, index (1.12 API)
-            local texture = UnitBuff(unit, i)
-            if not texture then break end
-            
-            for _, validIcon in pairs(icons) do
-                if _strfind(_strlower(texture), _strlower(validIcon)) then
-                    return true -- Found it!
-                end
-            end
-            i = i + 1
-        end
-        return false
-    end
-
     -- 1. Check Player (Fastest)
-    if CheckUnit("player") then return true end
+    if TA_CheckUnitForSanctuary("player", icons) then return true end
 
     -- 2. Check Raid/Party (Deep Scan)
     -- We scan this every 3s. To save CPU, we return immediately upon finding one instance.
     local numRaid = GetNumRaidMembers()
     if numRaid > 0 then
         for i=1, numRaid do
-            if CheckUnit("raid"..i) then return true end
+            if TA_CheckUnitForSanctuary("raid"..i, icons) then return true end
         end
     else
         local numParty = GetNumPartyMembers()
         for i=1, numParty do
-            if CheckUnit("party"..i) then return true end
+            if TA_CheckUnitForSanctuary("party"..i, icons) then return true end
         end
     end
 
@@ -431,20 +460,88 @@ function TankAudit_ScanForSanctuary()
 end
 
 -- D. MAIN SCAN ROUTINE
+
+-- Helper: Scan for actionable Debuffs
+-- Checks if player has a debuff that a group member can dispel
+function TankAudit_ScanDebuffs()
+    TA_ACTIVE_DEBUFFS = {}
+    
+    -- If we are solo, we generally can't be dispelled by others (unless we are a hybrid)
+    -- But per requirements: "scans party/raid roster". 
+    -- If solo, we check if WE can dispel ourselves.
+    
+    local i = 0
+    while true do
+        -- GetPlayerBuff(i, "HARMFUL") returns the index of the i-th debuff
+        local buffIndex = GetPlayerBuff(i, "HARMFUL")
+        if buffIndex < 0 then break end
+        
+        local texture, applications, debuffType = UnitDebuff("player", i + 1) -- UnitDebuff uses 1-based index
+        
+        if debuffType and texture then
+            -- Check if anyone in roster can handle this type
+            local canDispel = false
+            
+            -- Check the Dispel Map
+            local capableClasses = TA_DATA.DISPEL_MAP[debuffType]
+            if capableClasses then
+                for class, _ in pairs(capableClasses) do
+                    if TA_ROSTER_INFO.CLASSES[class] and TA_ROSTER_INFO.CLASSES[class] > 0 then
+                        canDispel = true
+                        break
+                    end
+                end
+            end
+            
+            if canDispel then
+                -- Store it! We need the buffIndex for the tooltip later
+                _tinsert(TA_ACTIVE_DEBUFFS, { 
+                    name = debuffType, -- Display "Magic", "Curse" etc. or we could use texture name
+                    texture = texture,
+                    type = debuffType,
+                    index = buffIndex 
+                })
+            end
+        end
+        
+        i = i + 1
+    end
+end
+
+-- Helper: Generate a Chat Link for a spell
+-- Uses hardcoded IDs from Data.lua because we cannot query links for spells we don't know
+function TankAudit_GetSpellLink(buffName)
+    -- 1. Find the ID in our data table
+    local spellID = nil
+    for class, data in pairs(TA_DATA.CLASSES) do
+        if data.GROUP and data.GROUP[buffName] then
+            spellID = data.GROUP[buffName].id
+            break
+        end
+    end
+
+    -- 2. If no ID found, return plain text
+    if not spellID then return buffName end
+
+    -- 3. Construct the Link string
+    -- Color: 71d5ff (Spell Blue)
+    -- |Hspell:ID|h[Name]|h
+    return "|cff71d5ff|Hspell:" .. spellID .. "|h[" .. buffName .. "]|h|r"
+end
+
 -- Main audit routine - scans all buffs and updates missing/expiring lists
--- Checks self-buffs, group buffs, consumables, and healthstones
--- Applies context-aware filtering (solo suppression, combat state, etc.)
--- Updates TA_MISSING_BUFFS and TA_EXPIRING_BUFFS tables
 function TankAudit_RunBuffScan()
-    if not TankAuditDB.enabled then 
+    if not TankAuditDB.enabled then
         TankAudit_UpdateUI()
-        return 
+        return
     end
 
     TankAudit_UpdateRoster()
 
     TA_MISSING_BUFFS = {}
     TA_EXPIRING_BUFFS = {}
+
+    TankAudit_ScanDebuffs()
 
     -- Define Context Variables
     local isSolo = (GetNumPartyMembers() == 0 and GetNumRaidMembers() == 0)
@@ -455,12 +552,15 @@ function TankAudit_RunBuffScan()
     if TankAuditDB.checkSelf and selfBuffs then
         for name, iconList in pairs(selfBuffs) do
             local knowsSpell = true
-            
-            -- Spellbook Checks
+
+            -- Spellbook Checks (UPDATED: Now checks Icons, not Names)
             if name == "Bear Form" then
-                if not (TankAudit_HasSpell("Bear Form") or TankAudit_HasSpell("Dire Bear Form")) then knowsSpell = false end
+                -- Special handling: Druids might have "Dire Bear Form" which shares the icon
+                -- or slightly differs. We check the iconList provided in TA_DATA.
+                if not TankAudit_HasSpell(iconList) then knowsSpell = false end
             elseif name == "Thorns" or name == "Righteous Fury" or name == "Lightning Shield" or name == "Battle Shout" then
-                if not TankAudit_HasSpell(name) then knowsSpell = false end
+                -- Standard check using the icon list from TA_DATA
+                if not TankAudit_HasSpell(iconList) then knowsSpell = false end
             end
 
             -- SOLO SUPPRESSION: Stances & Forms
@@ -475,17 +575,20 @@ function TankAudit_RunBuffScan()
             if knowsSpell and not skipCheck then
                 local hasBuff = false
                 local timeLeft = 0
-                
+
                 -- SPECIAL HANDLERS
                 if name == "Defensive Stance" then
                     -- Special Stance Check for Warriors
                     hasBuff = TankAudit_CheckStance("Ability_Warrior_DefensiveStance")
+
                 elseif name == "Bear Form" then
                     -- Standard Buff check works for Bear, but let's double check Stance bar for robustness
                     hasBuff = TankAudit_GetBuffStatus(iconList) or TankAudit_CheckStance("BearForm")
+
                 elseif name == "Rockbiter Weapon" then
                     -- Special Tooltip Scan for Shamans (Now returns time)
                     hasBuff, timeLeft = TankAudit_CheckSpecificEnchant("Rockbiter")
+
                 else
                     -- Standard Buff Scan
                     hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
@@ -514,7 +617,7 @@ function TankAudit_RunBuffScan()
             TA_MISSING_BUFFS = {}
             TA_EXPIRING_BUFFS = {}
             TankAudit_UpdateUI()
-            return 
+            return
         end
     end
 
@@ -527,6 +630,7 @@ function TankAudit_RunBuffScan()
 
     for class, data in pairs(TA_DATA.CLASSES) do
         local classCount = TA_ROSTER_INFO.CLASSES[class] or 0
+        
         if TankAuditDB.checkBuffs and classCount > 0 and data.GROUP then
             local validPaladinBuffs = {}
             if class == "PALADIN" then
@@ -535,13 +639,15 @@ function TankAudit_RunBuffScan()
                     if priority[p] then validPaladinBuffs[priority[p]] = true end
                 end
             end
+
             for name, iconList in pairs(data.GROUP) do
                 local shouldCheck = true
+                
                 if class == "PALADIN" then
                     if name == "Devotion Aura" then
                         -- Aura Check: STRICTLY requires a Paladin in your subgroup
-                        if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then 
-                            shouldCheck = false 
+                        if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then
+                            shouldCheck = false
                         end
                     elseif name == "Blessing of Sanctuary" then
                         -- Only ask for Sanc if we have PROOF a Prot Paladin exists
@@ -550,16 +656,19 @@ function TankAudit_RunBuffScan()
                         if not validPaladinBuffs[name] then shouldCheck = false end
                     else
                         -- Blessing Check: Allow from any Raid Paladin, but respect Priority List
-                        if not validPaladinBuffs[name] then 
-                            shouldCheck = false 
+                        if not validPaladinBuffs[name] then
+                            shouldCheck = false
                         end
                     end
                 end
+
                 if name == "Arcane Intellect" and TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false end
+                
                 if name == "Battle Shout" then
                     if TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false
                     elseif not TA_ROSTER_INFO.HAS_GROUP_WARRIOR then shouldCheck = false end
                 end
+                
                 if name == "Thorns" and TA_PLAYER_CLASS == "DRUID" then shouldCheck = false end
 
                 if shouldCheck then
@@ -581,19 +690,18 @@ function TankAudit_RunBuffScan()
     if checkConsumables then
         -- MODIFIED: Capture time left
         local hasFood, foodTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
-        
         if not hasFood then
             _tinsert(TA_MISSING_BUFFS, "Well Fed")
-        elseif foodTime > 0 and foodTime < 60 then 
+        elseif foodTime > 0 and foodTime < 60 then
             -- NEW: Alert if expiring in 1 minute or less
             _tinsert(TA_EXPIRING_BUFFS, { name = "Well Fed", time = foodTime })
         end
-        
+
         -- Generic Weapon Check (for non-Shaman/non-Druid)
-        if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then 
+        if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then
             local hasWep, wepTime = TankAudit_CheckWeapon()
-            if not hasWep then 
-                _tinsert(TA_MISSING_BUFFS, "Weapon Buff") 
+            if not hasWep then
+                _tinsert(TA_MISSING_BUFFS, "Weapon Buff")
             elseif wepTime > 0 and wepTime <= 60 then
                 _tinsert(TA_EXPIRING_BUFFS, { name = "Weapon Buff", time = wepTime })
             end
@@ -644,6 +752,22 @@ function TankAudit_CreateButtonPool()
         btn:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         tinsert(TA_BUTTON_POOL, btn)
     end
+end
+
+-- Handle mouseover tooltips for buttons
+-- Shows standard text for missing buffs, or full spell tooltip for active debuffs
+function TankAudit_Button_OnEnter(btn)
+    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    
+    -- If it's a real in-game debuff/buff that exists, show the full tooltip
+    if btn.buffIndex and btn.buffIndex > -1 then
+        GameTooltip:SetPlayerBuff(btn.buffIndex)
+    else
+        -- Fallback for "Missing" buffs (static text)
+        GameTooltip:SetText(btn.tooltipText, 1, 1, 1)
+    end
+    
+    GameTooltip:Show()
 end
 
 -- Update button timers and visual states every frame
@@ -705,102 +829,131 @@ end
 -- Rebuild and position all audit buttons based on current scan results
 -- Handles scaling, positioning, test mode, and button state management
 -- Creates centered horizontal row of icons showing missing/expiring buffs
+-- Rebuild and position all audit buttons based on current scan results
+-- Row 1 (Top): Active Debuffs (Red borders)
+-- Row 2 (Bottom): Missing/Expiring Buffs
 function TankAudit_UpdateUI()
-    -- 1. Get current scale 
+    -- 1. Get Settings
     local scale = TankAuditDB.scale or 1.0
-    local btnSize = TA_BUTTON_SIZE 
-    local spacing = TA_BUTTON_SPACING 
-
+    local btnSize = TA_BUTTON_SIZE
+    local spacing = TA_BUTTON_SPACING
+    
     -- Config Mode Logic
+    local renderDebuffs = TA_ACTIVE_DEBUFFS
     local renderMissing = TA_MISSING_BUFFS
     local renderExpiring = TA_EXPIRING_BUFFS
     
     local configFrame = getglobal("TankAudit_ConfigFrame")
     if configFrame and configFrame:IsVisible() then
-        renderMissing = { "Test Button 1", "Test Button 2", "Test Button 3" }
-        renderExpiring = {} 
-    end
-
-    -- 2. Count active buttons
-    local numMissing = _tgetn(renderMissing)
-    local numExpiring = _tgetn(renderExpiring)
-    local totalActive = numMissing + numExpiring
-
-    -- 3. Calculate starting Left Edge (Base Coordinates)
-    local currentXPosition = 0
-    if totalActive > 0 then
-        local totalBaseWidth = (totalActive * btnSize) + ((totalActive - 1) * spacing)
-        currentXPosition = -(totalBaseWidth / 2) + (btnSize / 2)
+        renderDebuffs = { 
+            { name = "Magic", texture = "Interface\\Icons\\Spell_Holy_WordFortitude", index = -1, isTest = true } 
+        }
+        renderMissing = { "Test Button 1", "Test Button 2" }
+        renderExpiring = {}
     end
 
     local usedButtons = 0
     local index = 1
 
--- Configure a single button to display a buff alert
--- Handles icon, text, color, scaling, and positioning
--- @param buffName (string) - Name of the buff to display
--- @param isExpiring (boolean) - True if buff is expiring, false if missing
--- @param timeLeft (number) - Seconds remaining (0 if missing)
-    local function SetupButton(buffName, isExpiring, timeLeft)
+    -- HELPER: Button Setup
+    local function SetupButton(data, mode, xOffset, yOffset)
         if index > TA_MAX_BUTTONS then return end
-        
         local btn = TA_BUTTON_POOL[index]
         
-        -- Apply Scale FIRST
-        btn:SetScale(scale) 
-        
-        local iconTexture = TankAudit_GetIconForName(buffName)
+        btn:SetScale(scale)
         local iconObj = getglobal(btn:GetName().."Icon")
         local textObj = btn.timerText
-
-        iconObj:SetTexture(iconTexture)
-        btn.buffName = buffName
-        btn.tooltipText = buffName
         
-        if btn.isExpiring ~= isExpiring then
-            btn.isExpiring = isExpiring
-            btn.expiresAt = nil 
-        end
-
-        if isExpiring then
-            iconObj:SetDesaturated(0)
+        -- Reset State
+        btn.isDebuff = false
+        btn.buffIndex = -1
+        btn.expiresAt = nil
+        iconObj:SetDesaturated(0)
+        textObj:Hide()
+        
+        if mode == "DEBUFF" then
+            btn.isDebuff = true
+            btn.buffName = data.type or "Debuff"
+            btn.buffIndex = data.index -- For Tooltip
+            btn.tooltipText = "Dispel: " .. (data.type or "Unknown")
+            
+            iconObj:SetTexture(data.texture)
+            -- Red text to indicate danger
+            textObj:SetText("|cFFFF0000DISPEL|r") 
+            textObj:Show()
+            
+            -- Debuff Visuals: Maybe color the border red? 
+            -- For now, the text "DISPEL" is clear enough.
+            
+        elseif mode == "MISSING" then
+            local buffName = data
+            btn.buffName = buffName
+            btn.tooltipText = buffName
+            iconObj:SetTexture(TankAudit_GetIconForName(buffName))
+            iconObj:SetDesaturated(1) -- Greyed out
+            
+        elseif mode == "EXPIRING" then
+            local buffName = data.name
+            btn.buffName = buffName
+            btn.tooltipText = buffName
+            iconObj:SetTexture(TankAudit_GetIconForName(buffName))
+            
+            -- Timer Logic
+            local timeLeft = data.time
             local newExpiry = GetTime() + timeLeft
             if not btn.expiresAt then btn.expiresAt = newExpiry
             elseif _mathabs(newExpiry - btn.expiresAt) > 2 then btn.expiresAt = newExpiry end
-
-            local displayTime = btn.expiresAt - GetTime()
-            local timeStr = FormatTimeLeft(displayTime)
             
-            if displayTime < TIMER_WARNING_THRESHOLD then textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
-            else textObj:SetText("|cFFFFFF00" .. timeStr .. "|r") end
             textObj:Show()
-        else
-            iconObj:SetDesaturated(1)
-            textObj:SetText("")
-            textObj:Hide()
-            btn.expiresAt = nil
+            -- (Timer text update handled by OnUpdate loop)
         end
-
-        -- 4. ABSOLUTE POSITIONING FIX
+        
+        -- POSITIONING
         btn:ClearAllPoints()
+        -- Row 1 (Debuffs) is higher up. Row 2 (Buffs) is at anchor.
+        btn:SetPoint("CENTER", "TankAudit_Anchor", "CENTER", xOffset, yOffset)
         
-        -- CORRECTED LINE: Do NOT divide X by scale.
-        -- The SetPoint function automatically scales the X offset.
-        btn:SetPoint("CENTER", "TankAudit_Anchor", "CENTER", currentXPosition, 0)
-        
-        currentXPosition = currentXPosition + btnSize + spacing
-
         btn:Show()
         usedButtons = usedButtons + 1
         index = index + 1
     end
 
-    for _, buffName in pairs(renderMissing) do SetupButton(buffName, false, 0) end
-    for _, buffData in pairs(renderExpiring) do SetupButton(buffData.name, true, buffData.time) end 
+    -- 2. CALCULATE ROW 1 (DEBUFFS) - Positioned ABOVE anchor
+    local numDebuffs = _tgetn(renderDebuffs)
+    if numDebuffs > 0 then
+        local rowWidth = (numDebuffs * btnSize) + ((numDebuffs - 1) * spacing)
+        local startX = -(rowWidth / 2) + (btnSize / 2)
+        local yPos = btnSize + 5 -- Attached ABOVE the main bar
+        
+        for _, debuff in pairs(renderDebuffs) do
+            SetupButton(debuff, "DEBUFF", startX, yPos)
+            startX = startX + btnSize + spacing
+        end
+    end
+
+    -- 3. CALCULATE ROW 2 (BUFFS) - Positioned AT anchor
+    local numMissing = _tgetn(renderMissing)
+    local numExpiring = _tgetn(renderExpiring)
+    local totalBuffs = numMissing + numExpiring
     
+    if totalBuffs > 0 then
+        local rowWidth = (totalBuffs * btnSize) + ((totalBuffs - 1) * spacing)
+        local startX = -(rowWidth / 2) + (btnSize / 2)
+        local yPos = 0 -- Main bar
+        
+        for _, buffName in pairs(renderMissing) do
+            SetupButton(buffName, "MISSING", startX, yPos)
+            startX = startX + btnSize + spacing
+        end
+        for _, buffData in pairs(renderExpiring) do
+            SetupButton(buffData, "EXPIRING", startX, yPos)
+            startX = startX + btnSize + spacing
+        end
+    end
+
+    -- Hide unused
     for i = usedButtons + 1, TA_MAX_BUTTONS do
-        local btn = TA_BUTTON_POOL[i]
-        if btn:IsVisible() then btn:Hide() end
+        if TA_BUTTON_POOL[i] then TA_BUTTON_POOL[i]:Hide() end
     end
 end
 
@@ -830,6 +983,32 @@ function TankAudit_GetIconForName(buffName)
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
+-- Helper: Get the specific name of a debuff by scanning the tooltip
+-- Required because UnitDebuff returns texture/type, but NOT the name in 1.12.
+function TankAudit_GetDebuffName(buffIndex)
+    -- Safety check
+    if not buffIndex or buffIndex < 0 then return "Unknown" end
+
+    -- Use the local scanner we defined in Step 2
+    if not TA_TooltipScanner then
+        -- Just in case it wasn't initialized yet
+        TA_TooltipScanner = CreateFrame("GameTooltip", "TA_TooltipScanner_Private", nil, "GameTooltipTemplate")
+        TA_TooltipScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
+    end
+
+    TA_TooltipScanner:ClearLines()
+    -- Set the scanner to look at the specific debuff slot
+    TA_TooltipScanner:SetPlayerBuff(buffIndex)
+    
+    -- Read the Title (Line 1)
+    local textObj = getglobal("TA_TooltipScanner_PrivateTextLeft1")
+    if textObj then
+        return textObj:GetText() or "Unknown"
+    end
+    
+    return "Unknown"
+end
+
 -- Handle click events on audit buttons
 -- Behavior depends on buff type:
 --   • Self-buffs: Auto-cast the spell
@@ -845,19 +1024,16 @@ function TankAudit_RequestButton_OnClick(btn)
     -- 1. HANDLE CONFIG TEST BUTTONS
     if _strfind(buffName, "Test Button") then
         local msg = _strformat("Message from %s", buffName)
-        DEFAULT_CHAT_FRAME:AddMessage(msg) 
+        DEFAULT_CHAT_FRAME:AddMessage(msg)
         return
     end
 
     -- 2. HANDLE CONSUMABLES (Open Bags)
-    -- REMOVED: "Healthstone" from this check. 
-    -- If we are missing a HS, we need to ask for one, not look in empty bags.
     if buffName == "Well Fed" or buffName == "Weapon Buff" then
         local bagsOpen = false
         if ContainerFrame1 and ContainerFrame1:IsVisible() then
             bagsOpen = true
         end
-        
         if not bagsOpen then
             OpenAllBags()
         end
@@ -882,7 +1058,6 @@ function TankAudit_RequestButton_OnClick(btn)
     end
 
     -- 4. STANDARD GROUP REQUEST (Chat Message)
-    
     -- Throttle check
     if btn.lastClick and (GetTime() - btn.lastClick) < REQUEST_THROTTLE then
         DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_WAIT_THROTTLE)
@@ -897,20 +1072,41 @@ function TankAudit_RequestButton_OnClick(btn)
     end
 
     local msg = ""
-    if btn.isExpiring then
+
+    -- NEW: Handle Debuffs
+    if btn.isDebuff then
+        -- 1. Get the specific name (e.g. "Immolate")
+        local specificName = TankAudit_GetDebuffName(btn.buffIndex)
+        
+        -- 2. Format the message: "I have Immolate (Magic) - Dispel me please!"
+        -- buffName currently holds the Type (Magic/Curse) from SetupButton
+        msg = _strformat(TA_STRINGS.MSG_NEED_DISPEL, specificName, buffName)
+        
+    elseif btn.isExpiring then
         local timeText = getglobal(btn:GetName().."Text"):GetText() or "soon"
         msg = _strformat(TA_STRINGS.MSG_BUFF_EXPIRING, buffName, timeText)
     else
+        -- 5. GROUP BUFF REQUEST (RP Flavor)
+        
+        -- Generate the Link (e.g. "[Blessing of Kings]" in blue)
+        local spellLink = TankAudit_GetSpellLink(buffName)
+        
         -- Check for RP Messages
         if TA_RP_MESSAGES[buffName] then
             local options = TA_RP_MESSAGES[buffName]
             local choice = _mathrandom(1, _tgetn(options))
-            msg = options[choice]
+            local rawMsg = options[choice]
+            
+            -- Insert the link into the %s placeholder
+            msg = _strformat(rawMsg, spellLink)
         else
             -- Fallback default message
-            msg = _strformat(TA_STRINGS.MSG_NEED_BUFF, buffName)
+            -- Ensure fallback strings also have a %s in Localization, or handle it here
+            local fallback = TA_RP_MESSAGES["DEFAULT"][1] 
+            msg = _strformat(fallback, spellLink)
         end
     end
+    
     SendChatMessage(msg, channel)
 end
 

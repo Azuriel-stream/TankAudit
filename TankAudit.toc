@@ -2,7 +2,7 @@
 ## Title: TankAudit
 ## Notes: Smart buff, debuff, and consumable monitor for Tanks (Warrior, Druid, Paladin, Shaman).
 ## Author: Azuriel
-## Version: 1.0.0
+## Version: 1.2.0
 ## SavedVariables: TankAuditDB
 ## SavedVariablesPerCharacter: TankAuditCharDB
 

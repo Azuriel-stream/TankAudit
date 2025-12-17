@@ -11,7 +11,7 @@ TA_STRINGS = {
     -- Standard Messages
     MSG_NEED_BUFF = "I need %s!",
     MSG_BUFF_EXPIRING = "I need %s - expiring in %s!",
-    MSG_NEED_DISPEL = "I have %s - Dispel me please!",
+    MSG_NEED_DISPEL = "I have %s (%s) - Dispel me please!",
     MSG_NEED_HS = "I need a Healthstone please!",
     
     -- Local Alerts (Self-Reminders)
@@ -21,87 +21,76 @@ TA_STRINGS = {
 }
 
 -- RP FLAVOR MESSAGES
--- The addon will pick a random line from these lists.
--- RP FLAVOR MESSAGES
--- The addon will pick a random line from these lists based on the missing buff name.
+-- %s will be replaced by the clickable Spell Link
 TA_RP_MESSAGES = {
     -- PRIEST
     ["Power Word: Fortitude"] = {
-        "Priest, I require the blessing of Fortitude!",
-        "My shield is strong, but my health is low. Power Word: Fortitude, please!",
-        "Fortify me, Priest, so I may hold the line!"
+        "Priest, I require %s!",
+        "My shield is strong, but my health is low. %s please!",
+        "Fortify me, Priest! I need %s!"
     },
     ["Divine Spirit"] = {
-        "I need the guidance of the Divine Spirit.",
-        "Priest, grant me your Spirit buff!",
-        "My spirit is willing, but the buff is missing. Divine Spirit, please."
+        "I need the guidance of the %s.",
+        "Priest, grant me your Spirit! %s please!",
+        "My spirit is willing, but the buff is missing. %s please."
     },
 
     -- DRUID
     ["Mark of the Wild"] = {
-        "Druid, grant me the Mark of the Wild!",
-        "The spirits whisper... I need the Mark!",
-        "My fur needs thickening. Mark of the Wild, please!"
+        "Druid, grant me the %s!",
+        "The spirits whisper... I need %s!",
+        "My fur needs thickening. %s please!"
     },
     ["Thorns"] = {
-        "Druid, cover me in Thorns!",
-        "I need Thorns to make them pay for striking me!",
-        "Let them bleed when they strike. Thorns, please!"
+        "Druid, cover me in %s!",
+        "I need %s to make them pay for striking me!",
+        "Let them bleed when they strike. %s please!"
     },
 
     -- MAGE
     ["Arcane Intellect"] = {
-        "Mage, I need some brilliance! (Arcane Intellect)",
-        "My mind feels dull. Arcane Intellect, if you please!",
-        "Grant me the intellect to hold this aggro!"
+        "Mage, I need some brilliance! %s please!",
+        "My mind feels dull. %s, if you please!",
+        "Grant me the intellect to hold this aggro! (%s)"
     },
 
     -- WARRIOR
     ["Battle Shout"] = {
-        "Warrior, let me hear your Battle Shout!",
-        "Roar for glory! I need Battle Shout!",
-        "Strengthen our arms, Warrior! Battle Shout, please!"
+        "Warrior, let me hear your %s!",
+        "Roar for glory! I need %s!",
+        "Strengthen our arms, Warrior! %s please!"
     },
 
     -- PALADIN
     ["Blessing of Kings"] = {
-        "Paladin, grant me the majesty of Kings!",
-        "A tank is nothing without his crown. Blessing of Kings, please!",
-        "By the Light, I require the Blessing of Kings!"
+        "Paladin, grant me the majesty of %s!",
+        "A tank is nothing without his crown. %s please!",
+        "By the Light, I require %s!"
     },
     ["Blessing of Might"] = {
-        "Paladin, grant me the strength to crush my foes! (Might)",
-        "My swings are weak. I need the Blessing of Might!",
-        "Empower me, Paladin! Blessing of Might!"
+        "Paladin, grant me the strength to crush my foes! %s!",
+        "My swings are weak. I need %s!",
+        "Empower me, Paladin! %s!"
     },
     ["Blessing of Wisdom"] = {
-        "Paladin, my mana is draining fast. Blessing of Wisdom, please!",
-        "Grant me the clarity of the Light. Blessing of Wisdom!",
-        "I need mana to hold the line! Wisdom, please!"
+        "Paladin, my mana is draining fast. %s please!",
+        "Grant me the clarity of the Light. %s!",
+        "I need mana to hold the line! %s please!"
     },
     ["Blessing of Sanctuary"] = {
-        "Paladin, ward me against harm! Blessing of Sanctuary!",
-        "I need the Light's protection. Sanctuary, please!",
-        "Shield me from their blows with the Blessing of Sanctuary!"
+        "Paladin, ward me against harm! %s!",
+        "I need the Light's protection. %s please!",
+        "Shield me from their blows with %s!"
     },
     ["Blessing of Light"] = {
-        "Illumine my path and my healing! Blessing of Light!",
-        "Let the healers' light shine brighter on me! Blessing of Light!",
-        "I need the holy light to mend me faster. Blessing of Light, please!"
+        "Illumine my path and my healing! %s!",
+        "Let the healers' light shine brighter on me! %s!",
+        "I need the holy light to mend me faster. %s please!"
     },
     ["Devotion Aura"] = {
-        "Paladin, I need your Devotion Aura for armor!",
-        "My armor is paper! Devotion Aura, please!",
-        "Protect us with your Devotion Aura!"
-    },
-
-    -- WARLOCK (Healthstone)
-    ["Healthstone"] = {
-        "Summoning cookie, please!",
-        "I require a green rock, Warlock.",
-        "The tank requires a soul shard... in cookie form.",
-        "Healthstone me!",
-        "My bags feel empty without a Healthstone."
+        "Paladin, I need your %s for armor!",
+        "My armor is paper! %s please!",
+        "Protect us with your %s!"
     },
 
     -- FALLBACK
