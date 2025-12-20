@@ -3,63 +3,67 @@ TA_DATA = {
     -- 1. CLASS BUFFS
     CLASSES = {
         WARRIOR = {
-            SELF = { 
+            SELF = {
                 ["Battle Shout"] = { "Ability_Warrior_BattleShout" },
-                -- NEW: Defensive Stance (Checked via Stance Bar)
                 ["Defensive Stance"] = { "Ability_Warrior_DefensiveStance" }
             },
             GROUP = {
-                ["Battle Shout"] = { "Ability_Warrior_BattleShout" }
+                -- Rank 7 (AQ20)
+                ["Battle Shout"] = { "Ability_Warrior_BattleShout", id = 25289 } 
             }
         },
         DRUID = {
             SELF = {
                 ["Thorns"] = { "Spell_Nature_Thorns" },
-                -- REMOVED: Omen of Clarity (Talent dependent)
                 ["Bear Form"] = { "Ability_Racial_BearForm" }
             },
             GROUP = {
-                ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration" },
-                -- Added Thorns to Group so Warriors can ask Druids for it
-                ["Thorns"] = { "Spell_Nature_Thorns" }
+                -- Rank 7
+                ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration", id = 9885 },
+                -- Rank 6
+                ["Thorns"] = { "Spell_Nature_Thorns", id = 9910 }
             }
         },
         PALADIN = {
             SELF = {
                 ["Righteous Fury"] = { "Spell_Holy_SealOfFury" }
-                -- REMOVED: Holy Shield (Talent dependent / Deep Prot only)
             },
             GROUP = {
-                ["Blessing of Kings"] = { "Spell_Magic_MageArmor", "Spell_Magic_GreaterBlessingofKings" },
-                ["Blessing of Might"] = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofKings" },
-                ["Blessing of Light"] = { "Spell_Holy_PrayerOfHealing02" },
-                ["Blessing of Sanctuary"] = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary" },
-                -- REMOVED: Blessing of Salvation (Tanks don't want threat reduction)
-                ["Devotion Aura"] = { "Spell_Holy_DevotionAura" }
+                -- Rank 1 (Scaling)
+                ["Blessing of Kings"] = { "Spell_Magic_MageArmor", "Spell_Magic_GreaterBlessingofKings", id = 20217 },
+                -- Rank 7 (AQ20)
+                ["Blessing of Might"] = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofKings", id = 25291 },
+                -- Rank 3
+                ["Blessing of Light"] = { "Spell_Holy_PrayerOfHealing02", id = 19979 },
+                -- Rank 4
+                ["Blessing of Sanctuary"] = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary", id = 20914 },
+                -- Rank 7
+                ["Devotion Aura"] = { "Spell_Holy_DevotionAura", id = 10293 }
             }
         },
         SHAMAN = {
-            SELF = { 
+            SELF = {
                 ["Lightning Shield"] = { "Spell_Nature_LightningShield" },
-                -- NEW: Rockbiter (Checked via Tooltip Scan)
                 ["Rockbiter Weapon"] = { "Spell_Nature_RockBiter" }
             },
             GROUP = {}
         },
         PRIEST = {
             GROUP = {
-                ["Divine Spirit"] = { "Spell_Holy_DivineSpirit", "Spell_Holy_PrayerofSpirit" },
-                ["Power Word: Fortitude"] = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude" }
+                -- Rank 4
+                ["Divine Spirit"] = { "Spell_Holy_DivineSpirit", "Spell_Holy_PrayerofSpirit", id = 27841 },
+                -- Rank 6
+                ["Power Word: Fortitude"] = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude", id = 10938 }
             }
         },
         MAGE = {
             GROUP = {
-                ["Arcane Intellect"] = { "Spell_Holy_MagicalSentry", "Spell_Holy_ArcaneIntellect" }
+                -- Rank 5
+                ["Arcane Intellect"] = { "Spell_Holy_MagicalSentry", "Spell_Holy_ArcaneIntellect", id = 10157 }
             }
         },
-        -- WARLOCK (Empty) so the Roster Scanner counts them for Healthstones
         WARLOCK = {
-            GROUP = {} 
+            GROUP = {}
         }
     },
 
@@ -69,6 +73,29 @@ TA_DATA = {
         HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, 
         FLASKS = {
             ["Flask"] = { "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" }
+        }
+    },
+
+    -- 3. DISPEL RULES (1.12)
+    -- Mapping: Debuff Type -> List of Classes -> Requirements
+    DISPEL_RULES = {
+        ["Magic"] = {
+            PRIEST = { level = 18, spell = "Dispel Magic" },
+            PALADIN = { level = 42, spell = "Cleanse" }
+        },
+        ["Curse"] = {
+            MAGE = { level = 18, spell = "Remove Lesser Curse" },
+            DRUID = { level = 24, spell = "Remove Curse" }
+        },
+        ["Poison"] = {
+            DRUID = { level = 14, spell = "Cure Poison" },
+            PALADIN = { level = 8, spell = "Purify" }, -- Cleanse (42) also works, but Purify is baseline
+            SHAMAN = { level = 16, spell = "Cure Poison" }
+        },
+        ["Disease"] = {
+            PRIEST = { level = 14, spell = "Cure Disease" },
+            PALADIN = { level = 8, spell = "Purify" },
+            SHAMAN = { level = 22, spell = "Cure Disease" }
         }
     }
 }

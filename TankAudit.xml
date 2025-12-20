@@ -27,9 +27,7 @@
         <Scripts>
             <OnClick>TankAudit_RequestButton_OnClick(this);</OnClick>
             <OnEnter>
-                GameTooltip:SetOwner(this, "ANCHOR_RIGHT");
-                GameTooltip:SetText(this.tooltipText, 1, 1, 1);
-                GameTooltip:Show();
+                TankAudit_Button_OnEnter(this);
             </OnEnter>
             <OnLeave>GameTooltip:Hide();</OnLeave>
         </Scripts>
