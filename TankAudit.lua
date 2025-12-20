@@ -1123,12 +1123,23 @@ function TankAudit_RequestButton_OnClick(btn)
 
     -- NEW: Handle Debuffs
     if btn.isDebuff then
-        -- 1. Get the specific name (e.g. "Immolate")
-        local specificName = TankAudit_GetDebuffName(btn.buffIndex)
+        local debuffType = btn.buffName -- e.g. "Magic", "Poison"
         
-        -- 2. Format the message: "I have Immolate (Magic) - Dispel me please!"
-        -- buffName currently holds the Type (Magic/Curse) from SetupButton
-        msg = _strformat(TA_STRINGS.MSG_NEED_DISPEL, specificName, buffName)
+        -- 1. SELF-DISPEL CHECK
+        -- Check if the player is the one who can remove this
+        local myClassRule = TA_DATA.DISPEL_RULES[debuffType] and TA_DATA.DISPEL_RULES[debuffType][TA_PLAYER_CLASS]
+        
+        if myClassRule and UnitLevel("player") >= myClassRule.level then
+            -- We can do it! Cast the spell on ourselves.
+            -- CastSpellByName(spell, onSelf) -> onSelf is 1
+            CastSpellByName(myClassRule.spell, 1)
+            return
+        end
+
+        -- 2. GROUP REQUEST (Fallback)
+        -- If we can't do it (or are too low level), ask the group.
+        local specificName = TankAudit_GetDebuffName(btn.buffIndex)
+        msg = _strformat(TA_STRINGS.MSG_NEED_DISPEL, specificName, debuffType)
         
     elseif btn.isExpiring then
         local timeText = getglobal(btn:GetName().."Text"):GetText() or "soon"
