@@ -1,11 +1,19 @@
 -- TankAudit.lua
 
 -- 1. Constants & Variables
-local TA_VERSION = "1.4.0"
+local TA_VERSION = "1.4.0 (AURA-DEBUG)" 
 local TA_PLAYER_CLASS = nil
 local TA_IS_TANK = false
+
 -- State Variables
-local TA_ROSTER_CLASSES = {} 
+-- UPDATED: Now stores names per class for "Thank You" deduction
+local TA_ROSTER_INFO = {
+    CLASSES = {},              
+    NAMES = {},                -- New: { ["PALADIN"] = {"Bob", "Alice"} }
+    HAS_GROUP_WARRIOR = false, 
+    MY_SUBGROUP = 1
+}
+
 local TA_MISSING_BUFFS = {}  
 local TA_EXPIRING_BUFFS = {} 
 local TA_SCAN_QUEUED = false  
@@ -35,7 +43,7 @@ local HS_INTERVAL = 60
 -- Thresholds & Limits
 local MAX_BUFF_SLOTS = 32                
 local BUFF_WARNING_SELF = 15             
-local BUFF_WARNING_GROUP = 60            -- UPDATED: Changed from 120 to 60 per v1.4.0
+local BUFF_WARNING_GROUP = 60            
 local REQUEST_THROTTLE = 5               
 local TIMER_WARNING_THRESHOLD = 10       
 local MAIN_HAND_SLOT = 16                
@@ -53,8 +61,15 @@ local TA_DEFAULTS = {
     paladinPriority = { "Blessing of Kings", "Blessing of Might", "Blessing of Light", "Blessing of Sanctuary" }
 }
 
+-- Fallback Generic Messages (Local definition to avoid editing Localization.lua again)
+local TA_MSG_GENERIC_THANKS = {
+    "Thanks for the %s!",
+    "Got the %s, thanks!",
+    "Much appreciated, %s received."
+}
+
 -- ================================================================
--- LOCALIZE GLOBAL FUNCTIONS (Performance & Safety - 1.12 Best Practice)
+-- LOCALIZE GLOBAL FUNCTIONS
 -- ================================================================
 local _strfind = string.find
 local _strlower = string.lower
@@ -65,12 +80,12 @@ local _tgetn = table.getn
 local _mathceil = math.ceil
 local _mathabs = math.abs
 local _mathrandom = math.random
+local _mathfloor = math.floor 
 
 -- ================================================================
 -- HELPER FUNCTIONS
 -- ================================================================
 
--- Format seconds into readable time string
 local function FormatTimeLeft(seconds)
     if seconds > 60 then
         return _mathceil(seconds / 60) .. "m"
@@ -78,7 +93,6 @@ local function FormatTimeLeft(seconds)
         return tostring(_mathceil(seconds)) .. "s"
     end
 end
-
 
 -- 2. Slash Command Registration
 SLASH_TANKAUDIT1 = "/taudit"
@@ -88,40 +102,30 @@ end
 
 -- 3. Initialization
 function TankAudit_OnLoad()
-    -- Determine Class immediately
     local _, class = UnitClass("player")
     TA_PLAYER_CLASS = class
 
-    -- Define Valid Tank Classes (Including Shaman for Turtle WoW)
     if class == "WARRIOR" or class == "DRUID" or class == "PALADIN" or class == "SHAMAN" then
         TA_IS_TANK = true
     else
         TA_IS_TANK = false
     end
 
-    -- If NOT a tank, stop here.
-    if not TA_IS_TANK then
-        return 
-    end
+    if not TA_IS_TANK then return end
 
-    -- Register Events
     this:RegisterEvent("PLAYER_ENTERING_WORLD")
     this:RegisterEvent("PLAYER_REGEN_DISABLED")
     this:RegisterEvent("PLAYER_REGEN_ENABLED")
     this:RegisterEvent("LEARNED_SPELL_IN_TAB")
 
-    -- Event-Driven Updates
     this:RegisterEvent("UNIT_AURA")
     this:RegisterEvent("UNIT_INVENTORY_CHANGED")
     this:RegisterEvent("PLAYER_TARGET_CHANGED")
 
-    -- NEW: Chat Parsing for "Thank You" logic
-    this:RegisterEvent("CHAT_MSG_SPELL_FRIENDLYPLAYER_BUFF")
+    -- Removed the unreliable CHAT_MSG events
     
-    -- Create the UI Button Pool
     TankAudit_CreateButtonPool()
 
-    -- Print Loaded Message
     DEFAULT_CHAT_FRAME:AddMessage(_strformat(TA_STRINGS.LOADED, TA_VERSION))
 end
 
@@ -133,7 +137,7 @@ function TankAudit_SlashHandler(msg)
     end
 
     if msg == "config" or msg == "" then
-        TankAudit_ConfigFrame:Show() -- Show the new window
+        TankAudit_ConfigFrame:Show() 
     elseif msg == "debug" then
         TankAudit_DebugBuffs()
     elseif msg == "test" then
@@ -159,20 +163,18 @@ function TankAudit_OnEvent(event)
         
     elseif event == "UNIT_AURA" then
         if arg1 == "player" then
+            -- 1. Queue visual update
             TA_SCAN_QUEUED = true
+            
+            -- 2. Check Gratitude immediately (Reliable "Gain" detection)
+            TankAudit_CheckGratitude_BuffGain()
         end
 
     elseif event == "UNIT_INVENTORY_CHANGED" then
-        if arg1 == "player" then
-            TA_SCAN_QUEUED = true
-        end
+        if arg1 == "player" then TA_SCAN_QUEUED = true end
     
     elseif event == "PLAYER_TARGET_CHANGED" then
         TA_SCAN_QUEUED = true
-
-    -- NEW: Check who buffed us
-    elseif event == "CHAT_MSG_SPELL_FRIENDLYPLAYER_BUFF" then
-        TankAudit_CheckForGratitude(arg1)
     end
 end
 
@@ -208,24 +210,26 @@ end
 -- 7. LOGIC CORE
 -- =============================================================
 
--- State Variables
-local TA_ROSTER_INFO = {
-    CLASSES = {},              
-    HAS_GROUP_WARRIOR = false, 
-    MY_SUBGROUP = 1
-}
-
 -- A. Roster Analysis
+-- UPDATED: Now tracks NAMES of classes to help identify who buffed us
 function TankAudit_UpdateRoster()
     TA_ROSTER_INFO.CLASSES = {}
+    TA_ROSTER_INFO.NAMES = {} -- Clear names
     TA_ROSTER_INFO.HAS_GROUP_WARRIOR = false
     TA_ROSTER_INFO.HAS_GROUP_PALADIN = false 
     
     local numRaid = GetNumRaidMembers()
     local numParty = GetNumPartyMembers()
     
+    -- Helper to add name
+    local function AddToRoster(class, name)
+        TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
+        if not TA_ROSTER_INFO.NAMES[class] then TA_ROSTER_INFO.NAMES[class] = {} end
+        _tinsert(TA_ROSTER_INFO.NAMES[class], name)
+    end
+
     if numRaid == 0 and numParty == 0 then
-        TA_ROSTER_INFO.CLASSES[TA_PLAYER_CLASS] = 1
+        AddToRoster(TA_PLAYER_CLASS, UnitName("player"))
         return
     end
 
@@ -238,9 +242,9 @@ function TankAudit_UpdateRoster()
             end
         end
         for i = 1, numRaid do
-            local _, _, subgroup, _, _, class, _, online = GetRaidRosterInfo(i)
-            if online then
-                TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
+            local name, _, subgroup, _, _, class, _, online = GetRaidRosterInfo(i)
+            if online and class then
+                AddToRoster(class, name)
                 if subgroup == TA_ROSTER_INFO.MY_SUBGROUP then
                     if class == "WARRIOR" then TA_ROSTER_INFO.HAS_GROUP_WARRIOR = true end
                     if class == "PALADIN" then TA_ROSTER_INFO.HAS_GROUP_PALADIN = true end
@@ -250,12 +254,13 @@ function TankAudit_UpdateRoster()
         return
     end
 
-    TA_ROSTER_INFO.CLASSES[TA_PLAYER_CLASS] = 1
+    AddToRoster(TA_PLAYER_CLASS, UnitName("player"))
     for i = 1, numParty do
         local unit = "party"..i
         local _, class = UnitClass(unit)
+        local name = UnitName(unit)
         if class and UnitIsConnected(unit) then
-            TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
+            AddToRoster(class, name)
             if class == "WARRIOR" then TA_ROSTER_INFO.HAS_GROUP_WARRIOR = true end
             if class == "PALADIN" then TA_ROSTER_INFO.HAS_GROUP_PALADIN = true end
         end
@@ -286,39 +291,34 @@ end
 -- C. Healthstone Scanner
 function TankAudit_CheckHealthstone()
     if (TA_ROSTER_INFO.CLASSES["WARLOCK"] or 0) == 0 then return true end
-    
     for bag = 0, 4 do
         for slot = 1, GetContainerNumSlots(bag) do
             local link = GetContainerItemLink(bag, slot)
             if link and _strfind(link, "Healthstone") then
-                return true -- Found one
+                return true 
             end
         end
     end
-    return false -- Missing
+    return false 
 end
 
 -- Helper: Check Weapon Enchants
 function TankAudit_CheckWeapon()
     local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
-    
     if hasMH then
         local timeSeconds = (expMH or 0) / 1000
         return true, timeSeconds
     end
-    
     if hasOH then
         local timeSeconds = (expOH or 0) / 1000
         return true, timeSeconds
     end
-    
     return false, 0
 end
 
 -- Helper: Check cache for spell by Icon Texture
 function TankAudit_HasSpell(iconList)
     if not iconList or type(iconList) ~= "table" then return false end
-    
     for _, iconName in pairs(iconList) do
         local path = "interface\\icons\\" .. _strlower(iconName)
         if TA_KNOWN_SPELLS[path] then
@@ -345,7 +345,6 @@ end
 -- Helper: Scan Weapon Tooltip for Specific Enchant Name
 function TankAudit_CheckSpecificEnchant(enchantName)
     local hasMH, expMH, _, hasOH, expOH = GetWeaponEnchantInfo()
-
     if not hasMH then return false, 0 end
 
     if not TA_TooltipScanner then
@@ -366,7 +365,6 @@ function TankAudit_CheckSpecificEnchant(enchantName)
             end
         end
     end
-
     return false, 0
 end
 
@@ -377,7 +375,6 @@ function TankAudit_CacheSpells()
     while true do
        local name, rank = GetSpellName(i, "spell")
        if not name then break end
-       
        local texture = GetSpellTexture(i, "spell")
        if texture then
            TA_KNOWN_SPELLS[_strlower(texture)] = true
@@ -392,7 +389,6 @@ local function TA_CheckUnitForSanctuary(unit, icons)
     while true do
         local texture = UnitBuff(unit, i)
         if not texture then break end
-
         for _, validIcon in pairs(icons) do
             if _strfind(_strlower(texture), _strlower(validIcon)) then
                 return true 
@@ -407,7 +403,6 @@ end
 function TankAudit_ScanForSanctuary()
     local icons = TA_DATA.CLASSES["PALADIN"].GROUP["Blessing of Sanctuary"]
     if not icons then return false end
-
     if TA_CheckUnitForSanctuary("player", icons) then return true end
 
     local numRaid = GetNumRaidMembers()
@@ -421,7 +416,6 @@ function TankAudit_ScanForSanctuary()
             if TA_CheckUnitForSanctuary("party"..i, icons) then return true end
         end
     end
-
     return false
 end
 
@@ -430,23 +424,18 @@ end
 -- Helper: Scan for actionable Debuffs
 function TankAudit_ScanDebuffs()
     TA_ACTIVE_DEBUFFS = {}
-    
     local i = 0
     while true do
         local buffIndex = GetPlayerBuff(i, "HARMFUL")
         if buffIndex < 0 then break end
-        
         local texture, applications, debuffType = UnitDebuff("player", i + 1)
-        
         if debuffType and texture then
             local canDispel = false
-            
             if TankAudit_CanUnitDispel("player", debuffType) then
                 canDispel = true
             else
                 local numParty = GetNumPartyMembers()
                 local numRaid = GetNumRaidMembers()
-                
                 if numRaid > 0 then
                     if TA_DATA.DISPEL_RULES[debuffType] then
                         for class, _ in pairs(TA_DATA.DISPEL_RULES[debuffType]) do
@@ -465,7 +454,6 @@ function TankAudit_ScanDebuffs()
                     end
                 end
             end
-            
             if canDispel then
                 _tinsert(TA_ACTIVE_DEBUFFS, { 
                     name = debuffType, 
@@ -475,7 +463,6 @@ function TankAudit_ScanDebuffs()
                 })
             end
         end
-        
         i = i + 1
     end
 end
@@ -489,7 +476,6 @@ function TankAudit_GetSpellLink(buffName)
             break
         end
     end
-
     if not spellID then return buffName end
     return "|cff71d5ff|Hspell:" .. spellID .. "|h[" .. buffName .. "]|h|r"
 end
@@ -498,12 +484,9 @@ end
 function TankAudit_CanUnitDispel(unit, debuffType)
     local _, class = UnitClass(unit)
     if not class then return false end
-    
     local rules = TA_DATA.DISPEL_RULES[debuffType]
     if not rules or not rules[class] then return false end
-    
     local requirement = rules[class]
-    
     if UnitIsUnit(unit, "player") then
         local level = UnitLevel(unit)
         return level >= requirement.level
@@ -538,24 +521,20 @@ function TankAudit_RunBuffScan()
     if TankAuditDB.checkSelf and selfBuffs then
         for name, iconList in pairs(selfBuffs) do
             local knowsSpell = true
-
             if name == "Bear Form" then
                 if not TankAudit_HasSpell(iconList) then knowsSpell = false end
             elseif name == "Thorns" or name == "Righteous Fury" or name == "Lightning Shield" or name == "Battle Shout" then
                 if not TankAudit_HasSpell(iconList) then knowsSpell = false end
             end
-
             local skipCheck = false
             if isSolo then
                 if name == "Bear Form" or name == "Defensive Stance" or name == "Rockbiter Weapon" then
                     skipCheck = true
                 end
             end
-
             if knowsSpell and not skipCheck then
                 local hasBuff = false
                 local timeLeft = 0
-
                 if name == "Defensive Stance" then
                     hasBuff = TankAudit_CheckStance("Ability_Warrior_DefensiveStance")
                 elseif name == "Bear Form" then
@@ -565,10 +544,8 @@ function TankAudit_RunBuffScan()
                 else
                     hasBuff, timeLeft = TankAudit_GetBuffStatus(iconList)
                 end
-
                 local warningThreshold = BUFF_WARNING_SELF
                 if name == "Rockbiter Weapon" then warningThreshold = 60 end
-
                 if not hasBuff then
                     _tinsert(TA_MISSING_BUFFS, name)
                 elseif timeLeft > 0 and timeLeft < warningThreshold then
@@ -582,7 +559,6 @@ function TankAudit_RunBuffScan()
     if isSolo and not inCombat then
         local hasEnemyTarget = UnitExists("target") and UnitCanAttack("player", "target") and not UnitIsDead("target")
         local hasMissingSelfBuffs = (_tgetn(TA_MISSING_BUFFS) > 0)
-        
         if not (hasEnemyTarget and hasMissingSelfBuffs) then
             TA_MISSING_BUFFS = {}
             TA_EXPIRING_BUFFS = {}
@@ -600,7 +576,6 @@ function TankAudit_RunBuffScan()
 
     for class, data in pairs(TA_DATA.CLASSES) do
         local classCount = TA_ROSTER_INFO.CLASSES[class] or 0
-        
         if TankAuditDB.checkBuffs and classCount > 0 and data.GROUP then
             local validPaladinBuffs = {}
             if class == "PALADIN" then
@@ -609,10 +584,8 @@ function TankAudit_RunBuffScan()
                     if priority[p] then validPaladinBuffs[priority[p]] = true end
                 end
             end
-
             for name, iconList in pairs(data.GROUP) do
                 local shouldCheck = true
-                
                 if class == "PALADIN" then
                     if name == "Devotion Aura" then
                         if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then
@@ -627,14 +600,11 @@ function TankAudit_RunBuffScan()
                         end
                     end
                 end
-
                 if name == "Arcane Intellect" and TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false end
-                
                 if name == "Battle Shout" then
                     if TA_PLAYER_CLASS == "WARRIOR" then shouldCheck = false
                     elseif not TA_ROSTER_INFO.HAS_GROUP_WARRIOR then shouldCheck = false end
                 end
-                
                 if name == "Thorns" and TA_PLAYER_CLASS == "DRUID" then shouldCheck = false end
 
                 if shouldCheck then
@@ -651,7 +621,6 @@ function TankAudit_RunBuffScan()
 
     -- 4. Consumables
     local checkConsumables = TankAuditDB.checkFood and not isSolo
-    
     if checkConsumables then
         local hasFood, foodTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
         if not hasFood then
@@ -659,7 +628,6 @@ function TankAudit_RunBuffScan()
         elseif foodTime > 0 and foodTime < 60 then
             _tinsert(TA_EXPIRING_BUFFS, { name = "Well Fed", time = foodTime })
         end
-
         if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then
             local hasWep, wepTime = TankAudit_CheckWeapon()
             if not hasWep then
@@ -687,7 +655,6 @@ function TankAudit_CreateButtonPool()
         btn:SetID(i)
         
         local textObj = getglobal(btn:GetName().."Text")
-        
         textObj:SetWidth(50) 
         textObj:SetHeight(20)
         textObj:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
@@ -695,7 +662,6 @@ function TankAudit_CreateButtonPool()
         textObj:SetTextColor(1, 1, 1) 
         
         btn.timerText = textObj
-        
         btn:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         tinsert(TA_BUTTON_POOL, btn)
     end
@@ -703,34 +669,27 @@ end
 
 function TankAudit_Button_OnEnter(btn)
     GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-    
     if btn.buffIndex and btn.buffIndex > -1 then
         GameTooltip:SetPlayerBuff(btn.buffIndex)
     else
         GameTooltip:SetText(btn.tooltipText, 1, 1, 1)
     end
-    
     GameTooltip:Show()
 end
 
 function TankAudit_UpdateButtonVisuals()
     local currentTime = GetTime()
-    
     for _, btn in pairs(TA_BUTTON_POOL) do
         if btn:IsVisible() and btn.expiresAt then
             local timeLeft = btn.expiresAt - currentTime
-            
             local textObj = btn.timerText
             local iconObj = getglobal(btn:GetName().."Icon")
-            
             if timeLeft <= 0 then
                 textObj:SetText("|cFFFF00000|r") 
                 iconObj:SetDesaturated(1)
             else
                 iconObj:SetDesaturated(0)
-                
                 local timeStr = FormatTimeLeft(timeLeft)
-                
                 if timeLeft < TIMER_WARNING_THRESHOLD then
                     textObj:SetText("|cFFFF0000" .. timeStr .. "|r")
                 else
@@ -743,14 +702,11 @@ end
 
 function TankAudit_MovePriority(index, direction)
     local newIndex = index + direction
-    
     if newIndex < 1 or newIndex > 4 then return end
-    
     local list = TankAuditDB.paladinPriority
     local temp = list[newIndex]
     list[newIndex] = list[index]
     list[index] = temp
-    
     TankAuditDB.paladinPriority = list
     TankAudit_Config_OnShow() 
 end
@@ -766,9 +722,7 @@ function TankAudit_UpdateUI()
     
     local configFrame = getglobal("TankAudit_ConfigFrame")
     if configFrame and configFrame:IsVisible() then
-        renderDebuffs = { 
-            { name = "Magic", texture = "Interface\\Icons\\Spell_Holy_WordFortitude", index = -1, isTest = true } 
-        }
+        renderDebuffs = { { name = "Magic", texture = "Interface\\Icons\\Spell_Holy_WordFortitude", index = -1, isTest = true } }
         renderMissing = { "Test Button 1", "Test Button 2" }
         renderExpiring = {}
     end
@@ -779,13 +733,10 @@ function TankAudit_UpdateUI()
     local function SetupButton(data, mode, xOffset, yOffset)
         if index > TA_MAX_BUTTONS then return end
         local btn = TA_BUTTON_POOL[index]
-        
         btn:SetScale(scale)
         local iconObj = getglobal(btn:GetName().."Icon")
         local textObj = btn.timerText
-        
         btn.isDebuff = false
-        -- NEW: Track expiring status for RP message logic
         btn.isExpiring = false 
         btn.buffIndex = -1
         btn.expiresAt = nil
@@ -797,7 +748,6 @@ function TankAudit_UpdateUI()
             btn.buffName = data.type or "Debuff"
             btn.buffIndex = data.index 
             btn.tooltipText = "Dispel: " .. (data.type or "Unknown")
-            
             iconObj:SetTexture(data.texture)
             textObj:SetText("|cFFFF0000DISPEL|r") 
             textObj:Show()
@@ -812,21 +762,18 @@ function TankAudit_UpdateUI()
         elseif mode == "EXPIRING" then
             local buffName = data.name
             btn.buffName = buffName
-            btn.isExpiring = true -- Flag for click handler
+            btn.isExpiring = true 
             btn.tooltipText = buffName
             iconObj:SetTexture(TankAudit_GetIconForName(buffName))
-            
             local timeLeft = data.time
             local newExpiry = GetTime() + timeLeft
             if not btn.expiresAt then btn.expiresAt = newExpiry
             elseif _mathabs(newExpiry - btn.expiresAt) > 2 then btn.expiresAt = newExpiry end
-            
             textObj:Show()
         end
         
         btn:ClearAllPoints()
         btn:SetPoint("CENTER", "TankAudit_Anchor", "CENTER", xOffset, yOffset)
-        
         btn:Show()
         usedButtons = usedButtons + 1
         index = index + 1
@@ -837,7 +784,6 @@ function TankAudit_UpdateUI()
         local rowWidth = (numDebuffs * btnSize) + ((numDebuffs - 1) * spacing)
         local startX = -(rowWidth / 2) + (btnSize / 2)
         local yPos = btnSize + 5 
-        
         for _, debuff in pairs(renderDebuffs) do
             SetupButton(debuff, "DEBUFF", startX, yPos)
             startX = startX + btnSize + spacing
@@ -847,12 +793,10 @@ function TankAudit_UpdateUI()
     local numMissing = _tgetn(renderMissing)
     local numExpiring = _tgetn(renderExpiring)
     local totalBuffs = numMissing + numExpiring
-    
     if totalBuffs > 0 then
         local rowWidth = (totalBuffs * btnSize) + ((totalBuffs - 1) * spacing)
         local startX = -(rowWidth / 2) + (btnSize / 2)
         local yPos = 0 
-        
         for _, buffName in pairs(renderMissing) do
             SetupButton(buffName, "MISSING", startX, yPos)
             startX = startX + btnSize + spacing
@@ -873,70 +817,89 @@ function TankAudit_GetIconForName(buffName)
         if data.SELF and data.SELF[buffName] then return "Interface\\Icons\\" .. data.SELF[buffName][1] end
         if data.GROUP and data.GROUP[buffName] then return "Interface\\Icons\\" .. data.GROUP[buffName][1] end
     end
-    
     if TA_DATA.CONSUMABLES.FOOD[buffName] then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.FOOD[buffName][1] end
-    
-    if buffName == "Healthstone" then 
-        return "Interface\\Icons\\INV_Stone_04" 
-    end
-    
+    if buffName == "Healthstone" then return "Interface\\Icons\\INV_Stone_04" end
     if buffName == "Weapon Buff" then return "Interface\\Icons\\INV_Stone_SharpeningStone_01" end
-
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
 function TankAudit_GetDebuffName(buffIndex)
     if not buffIndex or buffIndex < 0 then return "Unknown" end
-
     if not TA_TooltipScanner then
         TA_TooltipScanner = CreateFrame("GameTooltip", "TA_TooltipScanner_Private", nil, "GameTooltipTemplate")
         TA_TooltipScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
     end
-
     TA_TooltipScanner:ClearLines()
     TA_TooltipScanner:SetPlayerBuff(buffIndex)
-    
     local textObj = getglobal("TA_TooltipScanner_PrivateTextLeft1")
-    if textObj then
-        return textObj:GetText() or "Unknown"
-    end
-    
+    if textObj then return textObj:GetText() or "Unknown" end
     return "Unknown"
 end
 
 -- =============================================================
--- NEW 1.4.0 LOGIC: THANK YOU MESSAGES
+-- NEW 1.4.0 LOGIC: GRATITUDE (AURA DEDUCTION)
 -- =============================================================
 
--- Detects "X casts Y on you" from combat log
--- Logic: If we requested 'Y' in the last 30s, say thanks.
-function TankAudit_CheckForGratitude(msg)
+function TankAudit_CheckGratitude_BuffGain()
+    -- 1. Do we have a pending request?
     if not TA_LAST_REQUEST.buffName then return end
 
-    -- Check if request is stale (>30 seconds old)
+    -- 2. Check Expiry (30s timeout)
     if (GetTime() - TA_LAST_REQUEST.timestamp) > 30 then
         TA_LAST_REQUEST.buffName = nil
         return
     end
 
-    -- Pattern: "Player casts Spell on you."
-    local caster, spell = nil, nil
-    
-    -- Try standard pattern
-    -- Note: 1.12 standard is "%s casts %s on you."
-    -- We use (.+) to catch names with spaces or realms (though unlikely in Vanilla)
-    for c, s in string.gfind(msg, "(.+) casts (.+) on you%.") do
-        caster = c
-        spell = s
+    -- 3. Verify we actually HAVE the buff now
+    local buffName = TA_LAST_REQUEST.buffName
+    local iconList = nil
+
+    -- Find icons for this buff name to check status
+    for class, data in pairs(TA_DATA.CLASSES) do
+        if data.GROUP and data.GROUP[buffName] then
+            iconList = data.GROUP[buffName]
+            break
+        end
     end
 
-    if caster and spell then
-        if spell == TA_LAST_REQUEST.buffName then
-            -- Trigger Thank You
-            TankAudit_SendThankYou(caster, spell)
-            -- Clear request so we don't thank twice
-            TA_LAST_REQUEST.buffName = nil
+    if not iconList then return end
+    
+    -- Check if active
+    local hasBuff = TankAudit_GetBuffStatus(iconList)
+
+    if hasBuff then
+        -- SUCCESS! We received the buff we asked for.
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Buff Received: " .. buffName .. "|r")
+        
+        -- 4. Deduce Provider
+        -- Find which class provides this buff
+        local providerClass = nil
+        for class, data in pairs(TA_DATA.CLASSES) do
+            if data.GROUP and data.GROUP[buffName] then
+                providerClass = class
+                break
+            end
         end
+
+        local providerName = nil
+        
+        -- If we know the class (e.g. PALADIN), check our Roster Info
+        if providerClass and TA_ROSTER_INFO.NAMES[providerClass] then
+            local names = TA_ROSTER_INFO.NAMES[providerClass]
+            local count = _tgetn(names)
+            
+            if count == 1 then
+                -- Precise Match: Only one person could have done it!
+                providerName = names[1]
+                DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Provider identified: " .. providerName .. "|r")
+            else
+                -- Ambiguous: Multiple Paladins.
+                DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Multiple providers ("..count.."), using generic thanks.|r")
+            end
+        end
+        
+        TankAudit_SendThankYou(providerName, buffName)
+        TA_LAST_REQUEST.buffName = nil
     end
 end
 
@@ -946,17 +909,26 @@ function TankAudit_SendThankYou(caster, spell)
     elseif GetNumPartyMembers() > 0 then channel = "PARTY"
     end
 
-    local options = TA_STRINGS.MSG_THANK_YOU
-    local choice = _mathrandom(1, _tgetn(options))
-    local rawMsg = options[choice]
-    
-    -- Format: "Thanks for the [Kings], PaladinBob!"
-    -- We create a link for the spell
+    local rawMsg = ""
     local spellLink = TankAudit_GetSpellLink(spell)
-    local msg = _strformat(rawMsg, spellLink, caster)
+
+    if caster then
+        -- We know the name: "Thanks for the [Kings], PaladinBob!"
+        local options = TA_STRINGS.MSG_THANK_YOU
+        local choice = _mathrandom(1, _tgetn(options))
+        rawMsg = options[choice]
+        rawMsg = _strformat(rawMsg, spellLink, caster)
+    else
+        -- We don't know the name: "Thanks for the [Kings]!"
+        local options = TA_MSG_GENERIC_THANKS
+        local choice = _mathrandom(1, _tgetn(options))
+        rawMsg = options[choice]
+        rawMsg = _strformat(rawMsg, spellLink)
+    end
     
-    SendChatMessage(msg, channel)
+    SendChatMessage(rawMsg, channel)
 end
+
 
 -- =============================================================
 -- CLICK HANDLER
@@ -1008,6 +980,8 @@ function TankAudit_RequestButton_OnClick(btn)
     -- NEW: Record Request for "Thank You" tracking
     TA_LAST_REQUEST.buffName = buffName
     TA_LAST_REQUEST.timestamp = GetTime()
+    
+    DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Request Stored: " .. buffName .. "|r")
 
     local channel = "SAY"
     if GetNumRaidMembers() > 0 then channel = "RAID"
@@ -1018,38 +992,29 @@ function TankAudit_RequestButton_OnClick(btn)
 
     if btn.isDebuff then
         local debuffType = btn.buffName 
-        
         local myClassRule = TA_DATA.DISPEL_RULES[debuffType] and TA_DATA.DISPEL_RULES[debuffType][TA_PLAYER_CLASS]
-        
         if myClassRule and UnitLevel("player") >= myClassRule.level then
             CastSpellByName(myClassRule.spell, 1)
             return
         end
-
         local specificName = TankAudit_GetDebuffName(btn.buffIndex)
         msg = _strformat(TA_STRINGS.MSG_NEED_DISPEL, specificName, debuffType)
         
     else
-        -- 5. GROUP BUFF REQUEST (RP Flavor)
         local spellLink = TankAudit_GetSpellLink(buffName)
-        
         if TA_RP_MESSAGES[buffName] then
             local options = TA_RP_MESSAGES[buffName]
             local choice = _mathrandom(1, _tgetn(options))
             local rawMsg = options[choice]
-            
             msg = _strformat(rawMsg, spellLink)
         else
             local fallback = TA_RP_MESSAGES["DEFAULT"][1] 
             msg = _strformat(fallback, spellLink)
         end
-        
-        -- NEW: Append Duration if Expiring
         if btn.isExpiring and btn.expiresAt then
              local timeLeft = btn.expiresAt - GetTime()
              if timeLeft > 0 then
                  local timeStr = FormatTimeLeft(timeLeft)
-                 -- Suffix: " (fading in 15s)"
                  msg = msg .. _strformat(TA_STRINGS.MSG_EXPIRING_SUFFIX, timeStr)
              end
         end
@@ -1074,13 +1039,11 @@ function TankAudit_InitializeDefaults()
     if not TankAuditDB then
         TankAuditDB = {}
     end
-    
     for k, v in pairs(TA_DEFAULTS) do
         if TankAuditDB[k] == nil then
             TankAuditDB[k] = v
         end
     end
-    
     TankAudit_UpdateScale()
     TankAudit_SetPosition(TankAuditDB.x, TankAuditDB.y)
 end
@@ -1095,13 +1058,11 @@ end
 function TankAudit_SetPosition(x, y)
     TankAuditDB.x = x
     TankAuditDB.y = y
-    
     local anchor = getglobal("TankAudit_Anchor")
     if anchor then
         anchor:ClearAllPoints()
         anchor:SetPoint("CENTER", UIParent, "CENTER", x, y)
     end
-
     if TankAudit_InputX then TankAudit_InputX:SetNumber(x) end
     if TankAudit_InputY then TankAudit_InputY:SetNumber(y) end
 end
@@ -1112,41 +1073,31 @@ end
 function TankAudit_Config_OnShow(frame)
     if not frame then frame = getglobal("TankAudit_ConfigFrame") end
     if not frame then return end
-
     local chkEnable = getglobal("TankAudit_CheckEnable")
     if chkEnable then chkEnable:SetChecked(TankAuditDB.enabled) end
-    
     local chkFood = getglobal("TankAudit_CheckFood")
     if chkFood then chkFood:SetChecked(TankAuditDB.checkFood) end
-    
     local chkBuffs = getglobal("TankAudit_CheckBuffs")
     if chkBuffs then chkBuffs:SetChecked(TankAuditDB.checkBuffs) end
-    
     local chkSelf = getglobal("TankAudit_CheckSelf")
     if chkSelf then chkSelf:SetChecked(TankAuditDB.checkSelf) end
-    
     local chkHS = getglobal("TankAudit_CheckHS")
     if chkHS then chkHS:SetChecked(TankAuditDB.checkHealthstone) end
-    
     local sldScale = getglobal("TankAudit_ScaleSlider")
     if sldScale then
         sldScale:SetValue(TankAuditDB.scale)
         getglobal(sldScale:GetName().."Text"):SetText(_strformat("Button Scale: %.1f", TankAuditDB.scale))
     end
-
     if TankAudit_InputX then TankAudit_InputX:SetNumber(TankAuditDB.x) end
     if TankAudit_InputY then TankAudit_InputY:SetNumber(TankAuditDB.y) end
-
     for i=1, 4 do
         local nameText = getglobal("TankAudit_Pri"..i.."Name")
         if nameText then
             local blessing = TankAuditDB.paladinPriority[i] or "Unknown"
             nameText:SetText(i..". "..blessing)
         end
-        
         local upBtn = getglobal("TankAudit_Pri"..i.."Up")
         local downBtn = getglobal("TankAudit_Pri"..i.."Down")
-        
         if upBtn then 
             if i == 1 then upBtn:Disable() else upBtn:Enable() end
         end
@@ -1154,10 +1105,8 @@ function TankAudit_Config_OnShow(frame)
             if i == 4 then downBtn:Disable() else downBtn:Enable() end
         end
     end
-
     local headerTexture = getglobal("TankAudit_ConfigFrameHeader")
     local titleText = getglobal("TankAudit_ConfigFrameTitle")
-    
     if headerTexture then
         headerTexture:ClearAllPoints()
         headerTexture:SetPoint("TOP", frame, "TOP", 0, 12)
@@ -1166,27 +1115,22 @@ function TankAudit_Config_OnShow(frame)
         titleText:ClearAllPoints()
         titleText:SetPoint("TOP", headerTexture, "TOP", 0, -14)
     end
-
     local startY = -40
-    
     local divGeneral = getglobal("TankAudit_Div_General")
     if divGeneral then
         divGeneral:ClearAllPoints()
         divGeneral:SetPoint("TOP", frame, "TOP", 0, startY)
     end
-    
     if chkEnable then
         chkEnable:ClearAllPoints()
         chkEnable:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, startY - 20)
     end
-    
     local filterY = startY - 60
     local divFilters = getglobal("TankAudit_Div_Filters")
     if divFilters then
         divFilters:ClearAllPoints()
         divFilters:SetPoint("TOP", frame, "TOP", 0, filterY)
     end
-    
     if chkFood then
         chkFood:ClearAllPoints()
         chkFood:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 20)
@@ -1203,14 +1147,12 @@ function TankAudit_Config_OnShow(frame)
         chkHS:ClearAllPoints()
         chkHS:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 110)
     end
-
     local paladinY = filterY - 150
     local divPaladin = getglobal("TankAudit_Div_Paladin")
     if divPaladin then
         divPaladin:ClearAllPoints()
         divPaladin:SetPoint("TOP", frame, "TOP", 0, paladinY)
     end
-    
     for i=1, 4 do
         local row = getglobal("TankAudit_Pri"..i)
         if row then
@@ -1218,18 +1160,15 @@ function TankAudit_Config_OnShow(frame)
             row:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, paladinY - 20 - ((i-1)*20))
         end
     end
-
     local visualY = paladinY - 120
     local divVisuals = getglobal("TankAudit_Div_Visuals")
     if divVisuals then
         divVisuals:ClearAllPoints()
         divVisuals:SetPoint("TOP", frame, "TOP", 0, visualY)
     end
-    
     if sldScale then
         sldScale:ClearAllPoints()
         sldScale:SetPoint("TOP", frame, "TOP", 0, visualY - 30)
     end
-
     TankAudit_UpdateUI()
 end
