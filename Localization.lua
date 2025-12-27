@@ -25,12 +25,13 @@ TA_STRINGS = {
     -- Local Alerts (Self-Reminders)
     MSG_LOCAL_FOOD = "|cFFFF0000[Audit]|r You need to eat! Check your bags.",
     MSG_LOCAL_WEAPON = "|cFFFF0000[Audit]|r Your weapon needs a Sharpening Stone/Oil!",
+    MSG_LOCAL_ELIXIR = "|cFFFF0000[Audit]|r You need an Elixir! Check your bags.",
+    MSG_LOCAL_FLASK = "|cFFFF0000[Audit]|r You need a Flask! Check your bags.",
     MSG_WAIT_THROTTLE = "|cFFFF0000[Audit]|r Wait before asking again.",
 }
 
 -- RP FLAVOR MESSAGES
 -- %s will be replaced by the clickable Spell Link
--- v1.4.0: Tones softened from "Demand" to "Request"
 TA_RP_MESSAGES = {
     -- PRIEST
     ["Power Word: Fortitude"] = {

@@ -1,15 +1,14 @@
 -- TankAudit.lua
 
 -- 1. Constants & Variables
-local TA_VERSION = "1.4.0 (AURA-DEBUG)" 
+local TA_VERSION = "1.4.0 (RELEASE)" 
 local TA_PLAYER_CLASS = nil
 local TA_IS_TANK = false
 
 -- State Variables
--- UPDATED: Now stores names per class for "Thank You" deduction
 local TA_ROSTER_INFO = {
     CLASSES = {},              
-    NAMES = {},                -- New: { ["PALADIN"] = {"Bob", "Alice"} }
+    NAMES = {},                
     HAS_GROUP_WARRIOR = false, 
     MY_SUBGROUP = 1
 }
@@ -55,13 +54,14 @@ local TA_DEFAULTS = {
     x = 0,      
     y = -100,   
     checkFood = true,
+    consumableLevel = 1, -- NEW: 1=Food, 2=Elixirs, 3=Flasks
     checkBuffs = true,
     checkSelf = true,
     checkHealthstone = true,
     paladinPriority = { "Blessing of Kings", "Blessing of Might", "Blessing of Light", "Blessing of Sanctuary" }
 }
 
--- Fallback Generic Messages (Local definition to avoid editing Localization.lua again)
+-- Fallback Generic Messages
 local TA_MSG_GENERIC_THANKS = {
     "Thanks for the %s!",
     "Got the %s, thanks!",
@@ -121,10 +121,11 @@ function TankAudit_OnLoad()
     this:RegisterEvent("UNIT_AURA")
     this:RegisterEvent("UNIT_INVENTORY_CHANGED")
     this:RegisterEvent("PLAYER_TARGET_CHANGED")
-
-    -- Removed the unreliable CHAT_MSG events
     
     TankAudit_CreateButtonPool()
+
+    -- NEW: Initialize Dropdown menu
+    UIDropDownMenu_Initialize(TankAudit_ConsumableDropdown, TankAudit_ConsumableDropdown_Initialize)
 
     DEFAULT_CHAT_FRAME:AddMessage(_strformat(TA_STRINGS.LOADED, TA_VERSION))
 end
@@ -163,10 +164,7 @@ function TankAudit_OnEvent(event)
         
     elseif event == "UNIT_AURA" then
         if arg1 == "player" then
-            -- 1. Queue visual update
             TA_SCAN_QUEUED = true
-            
-            -- 2. Check Gratitude immediately (Reliable "Gain" detection)
             TankAudit_CheckGratitude_BuffGain()
         end
 
@@ -210,18 +208,15 @@ end
 -- 7. LOGIC CORE
 -- =============================================================
 
--- A. Roster Analysis
--- UPDATED: Now tracks NAMES of classes to help identify who buffed us
 function TankAudit_UpdateRoster()
     TA_ROSTER_INFO.CLASSES = {}
-    TA_ROSTER_INFO.NAMES = {} -- Clear names
+    TA_ROSTER_INFO.NAMES = {} 
     TA_ROSTER_INFO.HAS_GROUP_WARRIOR = false
     TA_ROSTER_INFO.HAS_GROUP_PALADIN = false 
     
     local numRaid = GetNumRaidMembers()
     local numParty = GetNumPartyMembers()
     
-    -- Helper to add name
     local function AddToRoster(class, name)
         TA_ROSTER_INFO.CLASSES[class] = (TA_ROSTER_INFO.CLASSES[class] or 0) + 1
         if not TA_ROSTER_INFO.NAMES[class] then TA_ROSTER_INFO.NAMES[class] = {} end
@@ -620,20 +615,50 @@ function TankAudit_RunBuffScan()
     end
 
     -- 4. Consumables
+    -- UPDATED: Multi-level logic
     local checkConsumables = TankAuditDB.checkFood and not isSolo
+    local consLevel = TankAuditDB.consumableLevel or 1
+
     if checkConsumables then
+        -- 4a. FOOD CHECK (Level 1+)
         local hasFood, foodTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
         if not hasFood then
             _tinsert(TA_MISSING_BUFFS, "Well Fed")
         elseif foodTime > 0 and foodTime < 60 then
             _tinsert(TA_EXPIRING_BUFFS, { name = "Well Fed", time = foodTime })
         end
+
+        -- 4b. WEAPON CHECK (Warrior/Paladin)
         if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then
             local hasWep, wepTime = TankAudit_CheckWeapon()
             if not hasWep then
                 _tinsert(TA_MISSING_BUFFS, "Weapon Buff")
             elseif wepTime > 0 and wepTime <= 60 then
                 _tinsert(TA_EXPIRING_BUFFS, { name = "Weapon Buff", time = wepTime })
+            end
+        end
+
+        -- 4c. ELIXIR/FLASK CHECK (Level 2+)
+        if consLevel >= 2 then
+            -- Level 2: Accepts Elixirs OR Flasks (Generic "Elixir")
+            if consLevel == 2 then
+                -- Note: FLASKS list is also included in ELIXIRS list in Data.lua
+                local hasElixir, elixTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.ELIXIRS["Elixir"])
+                if not hasElixir then
+                    _tinsert(TA_MISSING_BUFFS, "Elixir")
+                elseif elixTime > 0 and elixTime < 60 then
+                    _tinsert(TA_EXPIRING_BUFFS, { name = "Elixir", time = elixTime })
+                end
+            end
+
+            -- Level 3: Requires Flask (Specific "Flask")
+            if consLevel == 3 then
+                local hasFlask, fTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FLASKS["Flask"])
+                if not hasFlask then
+                    _tinsert(TA_MISSING_BUFFS, "Flask")
+                elseif fTime > 0 and fTime < 60 then
+                    _tinsert(TA_EXPIRING_BUFFS, { name = "Flask", time = fTime })
+                end
             end
         end
     end
@@ -812,6 +837,7 @@ function TankAudit_UpdateUI()
     end
 end
 
+-- UPDATED: Added Elixir/Flask handling
 function TankAudit_GetIconForName(buffName)
     for class, data in pairs(TA_DATA.CLASSES) do
         if data.SELF and data.SELF[buffName] then return "Interface\\Icons\\" .. data.SELF[buffName][1] end
@@ -820,6 +846,10 @@ function TankAudit_GetIconForName(buffName)
     if TA_DATA.CONSUMABLES.FOOD[buffName] then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.FOOD[buffName][1] end
     if buffName == "Healthstone" then return "Interface\\Icons\\INV_Stone_04" end
     if buffName == "Weapon Buff" then return "Interface\\Icons\\INV_Stone_SharpeningStone_01" end
+    -- NEW
+    if buffName == "Elixir" then return "Interface\\Icons\\INV_Potion_32" end -- Mongoose Icon as generic
+    if buffName == "Flask" then return "Interface\\Icons\\INV_Potion_62" end -- Titans Icon
+    
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
@@ -868,11 +898,7 @@ function TankAudit_CheckGratitude_BuffGain()
     local hasBuff = TankAudit_GetBuffStatus(iconList)
 
     if hasBuff then
-        -- SUCCESS! We received the buff we asked for.
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Buff Received: " .. buffName .. "|r")
-        
         -- 4. Deduce Provider
-        -- Find which class provides this buff
         local providerClass = nil
         for class, data in pairs(TA_DATA.CLASSES) do
             if data.GROUP and data.GROUP[buffName] then
@@ -889,12 +915,7 @@ function TankAudit_CheckGratitude_BuffGain()
             local count = _tgetn(names)
             
             if count == 1 then
-                -- Precise Match: Only one person could have done it!
                 providerName = names[1]
-                DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Provider identified: " .. providerName .. "|r")
-            else
-                -- Ambiguous: Multiple Paladins.
-                DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Multiple providers ("..count.."), using generic thanks.|r")
             end
         end
         
@@ -944,7 +965,8 @@ function TankAudit_RequestButton_OnClick(btn)
         return
     end
 
-    if buffName == "Well Fed" or buffName == "Weapon Buff" then
+    -- UPDATED: Added Elixir and Flask handling (Open Bags)
+    if buffName == "Well Fed" or buffName == "Weapon Buff" or buffName == "Elixir" or buffName == "Flask" then
         local bagsOpen = false
         if ContainerFrame1 and ContainerFrame1:IsVisible() then
             bagsOpen = true
@@ -957,6 +979,10 @@ function TankAudit_RequestButton_OnClick(btn)
             DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FOOD)
         elseif buffName == "Weapon Buff" then
             DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_WEAPON)
+        elseif buffName == "Elixir" then
+            DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_ELIXIR)
+        elseif buffName == "Flask" then
+            DEFAULT_CHAT_FRAME:AddMessage(TA_STRINGS.MSG_LOCAL_FLASK)
         end
         return
     end
@@ -981,8 +1007,6 @@ function TankAudit_RequestButton_OnClick(btn)
     TA_LAST_REQUEST.buffName = buffName
     TA_LAST_REQUEST.timestamp = GetTime()
     
-    DEFAULT_CHAT_FRAME:AddMessage("|cFFFF8800[TA Debug] Request Stored: " .. buffName .. "|r")
-
     local channel = "SAY"
     if GetNumRaidMembers() > 0 then channel = "RAID"
     elseif GetNumPartyMembers() > 0 then channel = "PARTY"
@@ -1068,25 +1092,67 @@ function TankAudit_SetPosition(x, y)
 end
 
 -- =============================================================
--- CONFIGURATION UI HANDLER
+-- CONFIGURATION UI HANDLER (UPDATED)
 -- =============================================================
+
+function TankAudit_ConsumableDropdown_OnClick()
+    UIDropDownMenu_SetSelectedID(TankAudit_ConsumableDropdown, this:GetID())
+    TankAuditDB.consumableLevel = this:GetID()
+    -- Force re-scan to show/hide new buttons immediately
+    TankAudit_RunBuffScan()
+end
+
+function TankAudit_ConsumableDropdown_Initialize()
+    local info = {}
+    
+    info.text = "Food Only"
+    info.func = TankAudit_ConsumableDropdown_OnClick
+    info.checked = (TankAuditDB.consumableLevel == 1)
+    UIDropDownMenu_AddButton(info)
+    
+    info.text = "Food & Elixirs"
+    info.func = TankAudit_ConsumableDropdown_OnClick
+    info.checked = (TankAuditDB.consumableLevel == 2)
+    UIDropDownMenu_AddButton(info)
+    
+    info.text = "Food & Flasks"
+    info.func = TankAudit_ConsumableDropdown_OnClick
+    info.checked = (TankAuditDB.consumableLevel == 3)
+    UIDropDownMenu_AddButton(info)
+end
+
 function TankAudit_Config_OnShow(frame)
     if not frame then frame = getglobal("TankAudit_ConfigFrame") end
     if not frame then return end
+    
     local chkEnable = getglobal("TankAudit_CheckEnable")
     if chkEnable then chkEnable:SetChecked(TankAuditDB.enabled) end
     local chkFood = getglobal("TankAudit_CheckFood")
     if chkFood then chkFood:SetChecked(TankAuditDB.checkFood) end
+    
+    -- [[ UPDATED SECTION: DROPDOWN PERSISTENCE ]]
+    local level = TankAuditDB.consumableLevel or 1
+    UIDropDownMenu_SetSelectedID(TankAudit_ConsumableDropdown, level)
+    
+    -- Set the text based on the saved value
+    local labelText = "Food Only"
+    if level == 2 then labelText = "Food & Elixirs"
+    elseif level == 3 then labelText = "Food & Flasks"
+    end
+    UIDropDownMenu_SetText(labelText, TankAudit_ConsumableDropdown) 
+    -- [[ END UPDATED SECTION ]]
+
     local chkBuffs = getglobal("TankAudit_CheckBuffs")
     if chkBuffs then chkBuffs:SetChecked(TankAuditDB.checkBuffs) end
     local chkSelf = getglobal("TankAudit_CheckSelf")
     if chkSelf then chkSelf:SetChecked(TankAuditDB.checkSelf) end
     local chkHS = getglobal("TankAudit_CheckHS")
     if chkHS then chkHS:SetChecked(TankAuditDB.checkHealthstone) end
+    
     local sldScale = getglobal("TankAudit_ScaleSlider")
     if sldScale then
         sldScale:SetValue(TankAuditDB.scale)
-        getglobal(sldScale:GetName().."Text"):SetText(_strformat("Button Scale: %.1f", TankAuditDB.scale))
+        getglobal(sldScale:GetName().."Text"):SetText(string.format("Button Scale: %.1f", TankAuditDB.scale))
     end
     if TankAudit_InputX then TankAudit_InputX:SetNumber(TankAuditDB.x) end
     if TankAudit_InputY then TankAudit_InputY:SetNumber(TankAuditDB.y) end
@@ -1137,17 +1203,17 @@ function TankAudit_Config_OnShow(frame)
     end
     if chkBuffs then
         chkBuffs:ClearAllPoints()
-        chkBuffs:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 50)
+        chkBuffs:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 90)
     end
     if chkSelf then
         chkSelf:ClearAllPoints()
-        chkSelf:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 80)
+        chkSelf:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 120)
     end
     if chkHS then
         chkHS:ClearAllPoints()
-        chkHS:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 110)
+        chkHS:SetPoint("TOPLEFT", frame, "TOPLEFT", 25, filterY - 150)
     end
-    local paladinY = filterY - 150
+    local paladinY = filterY - 190
     local divPaladin = getglobal("TankAudit_Div_Paladin")
     if divPaladin then
         divPaladin:ClearAllPoints()

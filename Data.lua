@@ -71,8 +71,30 @@ TA_DATA = {
     CONSUMABLES = {
         FOOD = { ["Well Fed"] = { "Spell_Misc_Food" } },
         HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, 
+        
+        -- UPDATED: Added Elixirs
+        -- Note: We group these under a generic "Elixir" key so finding ANY of them satisfies the check.
+        ELIXIRS = {
+            ["Elixir"] = { 
+                "INV_Potion_32", -- Mongoose
+                "INV_Potion_61", -- Giants
+                "INV_Potion_86", -- Superior Defense
+                "INV_Potion_43", -- Fortitude
+                "INV_Potion_33", -- Major Troll's Blood
+                "INV_Potion_62", -- Flasks count as Elixirs too for Level 2 check
+                "INV_Potion_97", 
+                "INV_Potion_41", 
+                "INV_Potion_48" 
+            }
+        },
+        
         FLASKS = {
-            ["Flask"] = { "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" }
+            ["Flask"] = { 
+                "INV_Potion_62", -- Titans
+                "INV_Potion_97", -- Distilled Wisdom
+                "INV_Potion_41", -- Supreme Power
+                "INV_Potion_48"  -- Chromatic Resistance
+            }
         }
     },
 
@@ -89,7 +111,7 @@ TA_DATA = {
         },
         ["Poison"] = {
             DRUID = { level = 14, spell = "Cure Poison" },
-            PALADIN = { level = 8, spell = "Purify" }, -- Cleanse (42) also works, but Purify is baseline
+            PALADIN = { level = 8, spell = "Purify" }, 
             SHAMAN = { level = 16, spell = "Cure Poison" }
         },
         ["Disease"] = {
