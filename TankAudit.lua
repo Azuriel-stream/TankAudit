@@ -1,7 +1,7 @@
 -- TankAudit.lua
 
 -- 1. Constants & Variables
-local TA_VERSION = "1.4.0 (RELEASE)" 
+local TA_VERSION = "1.4.0" 
 local TA_PLAYER_CLASS = nil
 local TA_IS_TANK = false
 
@@ -10,6 +10,7 @@ local TA_ROSTER_INFO = {
     CLASSES = {},              
     NAMES = {},                
     HAS_GROUP_WARRIOR = false, 
+    HAS_GROUP_PALADIN = false,
     MY_SUBGROUP = 1
 }
 
@@ -27,7 +28,7 @@ local TA_BUTTON_SPACING = 2
 local TA_FRAME_ANCHOR = "CENTER" 
 local TA_TooltipScanner = nil
 
--- NEW: Request Tracking (For Thank You messages)
+-- Request Tracking (For Thank You messages)
 local TA_LAST_REQUEST = {
     buffName = nil,
     timestamp = 0
@@ -54,7 +55,7 @@ local TA_DEFAULTS = {
     x = 0,      
     y = -100,   
     checkFood = true,
-    consumableLevel = 1, -- NEW: 1=Food, 2=Elixirs, 3=Flasks
+    consumableLevel = 1, -- 1=Food, 2=Elixirs, 3=Flasks
     checkBuffs = true,
     checkSelf = true,
     checkHealthstone = true,
@@ -124,7 +125,7 @@ function TankAudit_OnLoad()
     
     TankAudit_CreateButtonPool()
 
-    -- NEW: Initialize Dropdown menu
+    -- Initialize Dropdown menu
     UIDropDownMenu_Initialize(TankAudit_ConsumableDropdown, TankAudit_ConsumableDropdown_Initialize)
 
     DEFAULT_CHAT_FRAME:AddMessage(_strformat(TA_STRINGS.LOADED, TA_VERSION))
@@ -416,9 +417,11 @@ end
 
 -- D. MAIN SCAN ROUTINE
 
--- Helper: Scan for actionable Debuffs
+-- Helper: Scan for actionable Debuffs AND Unwanted Buffs (Salvation)
 function TankAudit_ScanDebuffs()
     TA_ACTIVE_DEBUFFS = {}
+    
+    -- 1. Scan HARMFUL (Debuffs)
     local i = 0
     while true do
         local buffIndex = GetPlayerBuff(i, "HARMFUL")
@@ -454,11 +457,43 @@ function TankAudit_ScanDebuffs()
                     name = debuffType, 
                     texture = texture, 
                     type = debuffType, 
-                    index = buffIndex 
+                    index = buffIndex,
+                    isCancelable = false 
                 })
             end
         end
         i = i + 1
+    end
+
+    -- 2. Scan HELPFUL (Buffs) for UNWANTED ones (Salvation)
+    local k = 0
+    while true do
+        local buffIndex = GetPlayerBuff(k, "HELPFUL")
+        if buffIndex < 0 then break end
+        
+        local texture = GetPlayerBuffTexture(buffIndex)
+        if texture then
+            local unwantedList = TA_DATA.UNWANTED["Blessing of Salvation"]
+            local isUnwanted = false
+            
+            for _, badIcon in pairs(unwantedList) do
+                if _strfind(_strlower(texture), _strlower(badIcon)) then
+                    isUnwanted = true
+                    break
+                end
+            end
+            
+            if isUnwanted then
+                _tinsert(TA_ACTIVE_DEBUFFS, {
+                    name = "Blessing of Salvation",
+                    texture = texture,
+                    type = "Unwanted",
+                    index = buffIndex,
+                    isCancelable = true
+                })
+            end
+        end
+        k = k + 1
     end
 end
 
@@ -582,7 +617,7 @@ function TankAudit_RunBuffScan()
             for name, iconList in pairs(data.GROUP) do
                 local shouldCheck = true
                 if class == "PALADIN" then
-                    if name == "Devotion Aura" then
+                    if name == "Paladin Aura" then
                         if not TA_ROSTER_INFO.HAS_GROUP_PALADIN then
                             shouldCheck = false
                         end
@@ -615,12 +650,10 @@ function TankAudit_RunBuffScan()
     end
 
     -- 4. Consumables
-    -- UPDATED: Multi-level logic
     local checkConsumables = TankAuditDB.checkFood and not isSolo
     local consLevel = TankAuditDB.consumableLevel or 1
 
     if checkConsumables then
-        -- 4a. FOOD CHECK (Level 1+)
         local hasFood, foodTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FOOD["Well Fed"])
         if not hasFood then
             _tinsert(TA_MISSING_BUFFS, "Well Fed")
@@ -628,7 +661,6 @@ function TankAudit_RunBuffScan()
             _tinsert(TA_EXPIRING_BUFFS, { name = "Well Fed", time = foodTime })
         end
 
-        -- 4b. WEAPON CHECK (Warrior/Paladin)
         if TA_PLAYER_CLASS ~= "DRUID" and TA_PLAYER_CLASS ~= "SHAMAN" then
             local hasWep, wepTime = TankAudit_CheckWeapon()
             if not hasWep then
@@ -638,11 +670,8 @@ function TankAudit_RunBuffScan()
             end
         end
 
-        -- 4c. ELIXIR/FLASK CHECK (Level 2+)
         if consLevel >= 2 then
-            -- Level 2: Accepts Elixirs OR Flasks (Generic "Elixir")
             if consLevel == 2 then
-                -- Note: FLASKS list is also included in ELIXIRS list in Data.lua
                 local hasElixir, elixTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.ELIXIRS["Elixir"])
                 if not hasElixir then
                     _tinsert(TA_MISSING_BUFFS, "Elixir")
@@ -651,7 +680,6 @@ function TankAudit_RunBuffScan()
                 end
             end
 
-            -- Level 3: Requires Flask (Specific "Flask")
             if consLevel == 3 then
                 local hasFlask, fTime = TankAudit_GetBuffStatus(TA_DATA.CONSUMABLES.FLASKS["Flask"])
                 if not hasFlask then
@@ -696,6 +724,11 @@ function TankAudit_Button_OnEnter(btn)
     GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
     if btn.buffIndex and btn.buffIndex > -1 then
         GameTooltip:SetPlayerBuff(btn.buffIndex)
+        
+        if btn.isCancelable then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine(TA_STRINGS.MSG_REMOVE_BUFF, 1, 0, 0)
+        end
     else
         GameTooltip:SetText(btn.tooltipText, 1, 1, 1)
     end
@@ -763,6 +796,7 @@ function TankAudit_UpdateUI()
         local textObj = btn.timerText
         btn.isDebuff = false
         btn.isExpiring = false 
+        btn.isCancelable = false 
         btn.buffIndex = -1
         btn.expiresAt = nil
         iconObj:SetDesaturated(0)
@@ -772,9 +806,15 @@ function TankAudit_UpdateUI()
             btn.isDebuff = true
             btn.buffName = data.type or "Debuff"
             btn.buffIndex = data.index 
+            btn.isCancelable = data.isCancelable 
             btn.tooltipText = "Dispel: " .. (data.type or "Unknown")
             iconObj:SetTexture(data.texture)
-            textObj:SetText("|cFFFF0000DISPEL|r") 
+            
+            if btn.isCancelable then
+                textObj:SetText("|cFFFF0000CANCEL|r")
+            else
+                textObj:SetText("|cFFFF0000DISPEL|r") 
+            end
             textObj:Show()
             
         elseif mode == "MISSING" then
@@ -837,7 +877,6 @@ function TankAudit_UpdateUI()
     end
 end
 
--- UPDATED: Added Elixir/Flask handling
 function TankAudit_GetIconForName(buffName)
     for class, data in pairs(TA_DATA.CLASSES) do
         if data.SELF and data.SELF[buffName] then return "Interface\\Icons\\" .. data.SELF[buffName][1] end
@@ -846,10 +885,8 @@ function TankAudit_GetIconForName(buffName)
     if TA_DATA.CONSUMABLES.FOOD[buffName] then return "Interface\\Icons\\" .. TA_DATA.CONSUMABLES.FOOD[buffName][1] end
     if buffName == "Healthstone" then return "Interface\\Icons\\INV_Stone_04" end
     if buffName == "Weapon Buff" then return "Interface\\Icons\\INV_Stone_SharpeningStone_01" end
-    -- NEW
-    if buffName == "Elixir" then return "Interface\\Icons\\INV_Potion_32" end -- Mongoose Icon as generic
-    if buffName == "Flask" then return "Interface\\Icons\\INV_Potion_62" end -- Titans Icon
-    
+    if buffName == "Elixir" then return "Interface\\Icons\\INV_Potion_32" end 
+    if buffName == "Flask" then return "Interface\\Icons\\INV_Potion_62" end 
     return "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
@@ -867,24 +904,19 @@ function TankAudit_GetDebuffName(buffIndex)
 end
 
 -- =============================================================
--- NEW 1.4.0 LOGIC: GRATITUDE (AURA DEDUCTION)
+-- GRATITUDE
 -- =============================================================
 
 function TankAudit_CheckGratitude_BuffGain()
-    -- 1. Do we have a pending request?
     if not TA_LAST_REQUEST.buffName then return end
-
-    -- 2. Check Expiry (30s timeout)
     if (GetTime() - TA_LAST_REQUEST.timestamp) > 30 then
         TA_LAST_REQUEST.buffName = nil
         return
     end
 
-    -- 3. Verify we actually HAVE the buff now
     local buffName = TA_LAST_REQUEST.buffName
     local iconList = nil
 
-    -- Find icons for this buff name to check status
     for class, data in pairs(TA_DATA.CLASSES) do
         if data.GROUP and data.GROUP[buffName] then
             iconList = data.GROUP[buffName]
@@ -894,11 +926,9 @@ function TankAudit_CheckGratitude_BuffGain()
 
     if not iconList then return end
     
-    -- Check if active
     local hasBuff = TankAudit_GetBuffStatus(iconList)
 
     if hasBuff then
-        -- 4. Deduce Provider
         local providerClass = nil
         for class, data in pairs(TA_DATA.CLASSES) do
             if data.GROUP and data.GROUP[buffName] then
@@ -909,7 +939,6 @@ function TankAudit_CheckGratitude_BuffGain()
 
         local providerName = nil
         
-        -- If we know the class (e.g. PALADIN), check our Roster Info
         if providerClass and TA_ROSTER_INFO.NAMES[providerClass] then
             local names = TA_ROSTER_INFO.NAMES[providerClass]
             local count = _tgetn(names)
@@ -934,13 +963,11 @@ function TankAudit_SendThankYou(caster, spell)
     local spellLink = TankAudit_GetSpellLink(spell)
 
     if caster then
-        -- We know the name: "Thanks for the [Kings], PaladinBob!"
         local options = TA_STRINGS.MSG_THANK_YOU
         local choice = _mathrandom(1, _tgetn(options))
         rawMsg = options[choice]
         rawMsg = _strformat(rawMsg, spellLink, caster)
     else
-        -- We don't know the name: "Thanks for the [Kings]!"
         local options = TA_MSG_GENERIC_THANKS
         local choice = _mathrandom(1, _tgetn(options))
         rawMsg = options[choice]
@@ -965,7 +992,6 @@ function TankAudit_RequestButton_OnClick(btn)
         return
     end
 
-    -- UPDATED: Added Elixir and Flask handling (Open Bags)
     if buffName == "Well Fed" or buffName == "Weapon Buff" or buffName == "Elixir" or buffName == "Flask" then
         local bagsOpen = false
         if ContainerFrame1 and ContainerFrame1:IsVisible() then
@@ -1003,7 +1029,7 @@ function TankAudit_RequestButton_OnClick(btn)
     end
     btn.lastClick = GetTime()
 
-    -- NEW: Record Request for "Thank You" tracking
+    -- Record Request
     TA_LAST_REQUEST.buffName = buffName
     TA_LAST_REQUEST.timestamp = GetTime()
     
@@ -1015,6 +1041,11 @@ function TankAudit_RequestButton_OnClick(btn)
     local msg = ""
 
     if btn.isDebuff then
+        if btn.isCancelable then
+            CancelPlayerBuff(btn.buffIndex)
+            return
+        end
+        
         local debuffType = btn.buffName 
         local myClassRule = TA_DATA.DISPEL_RULES[debuffType] and TA_DATA.DISPEL_RULES[debuffType][TA_PLAYER_CLASS]
         if myClassRule and UnitLevel("player") >= myClassRule.level then
@@ -1092,13 +1123,12 @@ function TankAudit_SetPosition(x, y)
 end
 
 -- =============================================================
--- CONFIGURATION UI HANDLER (UPDATED)
+-- CONFIGURATION UI HANDLER
 -- =============================================================
 
 function TankAudit_ConsumableDropdown_OnClick()
     UIDropDownMenu_SetSelectedID(TankAudit_ConsumableDropdown, this:GetID())
     TankAuditDB.consumableLevel = this:GetID()
-    -- Force re-scan to show/hide new buttons immediately
     TankAudit_RunBuffScan()
 end
 
@@ -1130,17 +1160,14 @@ function TankAudit_Config_OnShow(frame)
     local chkFood = getglobal("TankAudit_CheckFood")
     if chkFood then chkFood:SetChecked(TankAuditDB.checkFood) end
     
-    -- [[ UPDATED SECTION: DROPDOWN PERSISTENCE ]]
+    -- Dropdown Persistence Logic
     local level = TankAuditDB.consumableLevel or 1
     UIDropDownMenu_SetSelectedID(TankAudit_ConsumableDropdown, level)
-    
-    -- Set the text based on the saved value
     local labelText = "Food Only"
     if level == 2 then labelText = "Food & Elixirs"
     elseif level == 3 then labelText = "Food & Flasks"
     end
     UIDropDownMenu_SetText(labelText, TankAudit_ConsumableDropdown) 
-    -- [[ END UPDATED SECTION ]]
 
     local chkBuffs = getglobal("TankAudit_CheckBuffs")
     if chkBuffs then chkBuffs:SetChecked(TankAuditDB.checkBuffs) end

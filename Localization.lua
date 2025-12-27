@@ -8,13 +8,13 @@ TA_STRINGS = {
     PALADIN = "Paladin",
     SHAMAN = "Shaman",
     
-    -- Standard Messages
     MSG_NEED_BUFF = "I need %s!",
     MSG_BUFF_EXPIRING = "I need %s - expiring in %s!",
     MSG_NEED_DISPEL = "I have %s (%s) - Dispel me please!",
     MSG_NEED_HS = "I need a Healthstone please!",
+    -- NEW: Tooltip for canceling
+    MSG_REMOVE_BUFF = "Click to Cancel Buff",
     
-    -- New 1.4.0 Strings
     MSG_EXPIRING_SUFFIX = " (fading in %s)",
     MSG_THANK_YOU = {
         "Thanks for the %s, %s!",
@@ -22,7 +22,6 @@ TA_STRINGS = {
         "Got the %s, thank you %s!"
     },
     
-    -- Local Alerts (Self-Reminders)
     MSG_LOCAL_FOOD = "|cFFFF0000[Audit]|r You need to eat! Check your bags.",
     MSG_LOCAL_WEAPON = "|cFFFF0000[Audit]|r Your weapon needs a Sharpening Stone/Oil!",
     MSG_LOCAL_ELIXIR = "|cFFFF0000[Audit]|r You need an Elixir! Check your bags.",
@@ -31,7 +30,6 @@ TA_STRINGS = {
 }
 
 -- RP FLAVOR MESSAGES
--- %s will be replaced by the clickable Spell Link
 TA_RP_MESSAGES = {
     -- PRIEST
     ["Power Word: Fortitude"] = {
@@ -97,10 +95,11 @@ TA_RP_MESSAGES = {
         "Let the healers' light shine brighter on me! %s!",
         "I need the holy light to mend me faster. %s please!"
     },
-    ["Devotion Aura"] = {
-        "Paladin, I need your %s for armor!",
-        "My armor is paper! %s please!",
-        "Protect us with your %s!"
+    -- UPDATED KEY
+    ["Paladin Aura"] = {
+        "Paladin, I need an Aura (%s)!",
+        "My armor/threat needs boosting! %s please!",
+        "We are missing an Aura, Paladin! (%s)"
     },
 
     -- FALLBACK

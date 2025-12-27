@@ -8,7 +8,6 @@ TA_DATA = {
                 ["Defensive Stance"] = { "Ability_Warrior_DefensiveStance" }
             },
             GROUP = {
-                -- Rank 7 (AQ20)
                 ["Battle Shout"] = { "Ability_Warrior_BattleShout", id = 25289 } 
             }
         },
@@ -18,9 +17,7 @@ TA_DATA = {
                 ["Bear Form"] = { "Ability_Racial_BearForm" }
             },
             GROUP = {
-                -- Rank 7
                 ["Mark of the Wild"] = { "Spell_Nature_Regeneration", "Spell_Nature_Regeneration", id = 9885 },
-                -- Rank 6
                 ["Thorns"] = { "Spell_Nature_Thorns", id = 9910 }
             }
         },
@@ -29,16 +26,13 @@ TA_DATA = {
                 ["Righteous Fury"] = { "Spell_Holy_SealOfFury" }
             },
             GROUP = {
-                -- Rank 1 (Scaling)
                 ["Blessing of Kings"] = { "Spell_Magic_MageArmor", "Spell_Magic_GreaterBlessingofKings", id = 20217 },
-                -- Rank 7 (AQ20)
                 ["Blessing of Might"] = { "Spell_Holy_FistOfJustice", "Spell_Holy_GreaterBlessingofKings", id = 25291 },
-                -- Rank 3
-                ["Blessing of Light"] = { "Spell_Holy_PrayerOfHealing02", id = 19979 },
-                -- Rank 4
+                -- UPDATED: Added Greater Blessing of Light icon
+                ["Blessing of Light"] = { "Spell_Holy_PrayerOfHealing02", "Spell_Holy_GreaterBlessingofLight", id = 19979 },
                 ["Blessing of Sanctuary"] = { "Spell_Nature_LightningShield", "Spell_Holy_GreaterBlessingofSanctuary", id = 20914 },
-                -- Rank 7
-                ["Devotion Aura"] = { "Spell_Holy_DevotionAura", id = 10293 }
+                -- UPDATED: Renamed to "Paladin Aura" and added Retribution Aura icon
+                ["Paladin Aura"] = { "Spell_Holy_DevotionAura", "Spell_Holy_AuraOfLight", id = 10293 }
             }
         },
         SHAMAN = {
@@ -50,15 +44,12 @@ TA_DATA = {
         },
         PRIEST = {
             GROUP = {
-                -- Rank 4
                 ["Divine Spirit"] = { "Spell_Holy_DivineSpirit", "Spell_Holy_PrayerofSpirit", id = 27841 },
-                -- Rank 6
                 ["Power Word: Fortitude"] = { "Spell_Holy_WordFortitude", "Spell_Holy_PrayerOfFortitude", id = 10938 }
             }
         },
         MAGE = {
             GROUP = {
-                -- Rank 5
                 ["Arcane Intellect"] = { "Spell_Holy_MagicalSentry", "Spell_Holy_ArcaneIntellect", id = 10157 }
             }
         },
@@ -71,35 +62,18 @@ TA_DATA = {
     CONSUMABLES = {
         FOOD = { ["Well Fed"] = { "Spell_Misc_Food" } },
         HEALTHSTONE = { ["Healthstone"] = { "INV_Stone_04" } }, 
-        
-        -- UPDATED: Added Elixirs
-        -- Note: We group these under a generic "Elixir" key so finding ANY of them satisfies the check.
         ELIXIRS = {
             ["Elixir"] = { 
-                "INV_Potion_32", -- Mongoose
-                "INV_Potion_61", -- Giants
-                "INV_Potion_86", -- Superior Defense
-                "INV_Potion_43", -- Fortitude
-                "INV_Potion_33", -- Major Troll's Blood
-                "INV_Potion_62", -- Flasks count as Elixirs too for Level 2 check
-                "INV_Potion_97", 
-                "INV_Potion_41", 
-                "INV_Potion_48" 
+                "INV_Potion_32", "INV_Potion_61", "INV_Potion_86", "INV_Potion_43", 
+                "INV_Potion_33", "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" 
             }
         },
-        
         FLASKS = {
-            ["Flask"] = { 
-                "INV_Potion_62", -- Titans
-                "INV_Potion_97", -- Distilled Wisdom
-                "INV_Potion_41", -- Supreme Power
-                "INV_Potion_48"  -- Chromatic Resistance
-            }
+            ["Flask"] = { "INV_Potion_62", "INV_Potion_97", "INV_Potion_41", "INV_Potion_48" }
         }
     },
 
     -- 3. DISPEL RULES (1.12)
-    -- Mapping: Debuff Type -> List of Classes -> Requirements
     DISPEL_RULES = {
         ["Magic"] = {
             PRIEST = { level = 18, spell = "Dispel Magic" },
@@ -119,5 +93,11 @@ TA_DATA = {
             PALADIN = { level = 8, spell = "Purify" },
             SHAMAN = { level = 22, spell = "Cure Disease" }
         }
+    },
+
+    -- 4. UNWANTED BUFFS (For Tanks)
+    -- These will appear in the Debuff bar to be clicked off
+    UNWANTED = {
+        ["Blessing of Salvation"] = { "Spell_Holy_SealOfSalvation", "Spell_Holy_GreaterBlessingofSalvation" }
     }
 }
