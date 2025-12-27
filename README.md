@@ -6,20 +6,22 @@
 
 * **Smart Context Awareness:** The auditing bar automatically hides when you are playing solo and out of combat to keep your interface clean. It instantly wakes up when you target an enemy, enter combat, or join a group.
 
-* **NEW: Debuff Monitor:**
-    * Automatically detects active **Magic**, **Curse**, **Poison**, or **Disease** effects on you.
-    * **Smart Dispel:** Only alerts you if a class capable of removing that specific debuff is present in your group (and high enough level to have learned the spell).
-    * **Smart Actions:**
-        * **Self-Dispel:** If *you* can remove the debuff (e.g., a Paladin with *Cleanse*), clicking the button casts the spell on yourself.
-        * **Group Request:** If you need help, clicking the button sends a context-rich message to chat (e.g., *"I have [Immolate] (Magic) - Dispel me please!"*).
+* **Context-Aware Gratitude (v1.4.0):**
+    * When you request a buff (e.g., *Kings*) and receive it shortly after, your character will automatically thank the specific player who cast it in chat (e.g., *"Thanks for the [Blessing of Kings], PaladinBob!"*).
+
+* **Consumable Tracking Modes:**
+    * **Level 1 (Default):** Tracks Food only.
+    * **Level 2:** Tracks Food + Elixirs (Flasks count as Elixirs).
+    * **Level 3:** Tracks Food + Flasks (Hardcore mode).
+
+* **Debuff & Unwanted Buff Monitor:**
+    * **Smart Dispel:** Alerts you to Magic, Curse, Poison, or Disease effects only if your group has a class capable of dispelling them.
+    * **Salvation Canceller:** Automatically detects *Blessing of Salvation* on you (a tank's nightmare) and displays a red warning button. Clicking the button instantly cancels the buff.
 
 * **One-Click Actions:** Buttons are interactive!
-    * **Self-Buffs:** Left-click to auto-cast missing buffs (e.g., *Battle Shout*, *Thorns*, *Righteous Fury*, *Bear Form*).
-    * **Consumables:** Left-click missing Food or Weapon Enchants to instantly open your bags.
-    * **Group Requests:** Left-click missing raid buffs (e.g., *Fortitude*) to send a polite request to the group/raid chat using **clickable spell links**.
-    * **Solo Mode:** Intelligently suppresses "hardcore" requirements (like Weapon Oils, Food, or Defensive Stance) when you are playing solo.
-
-* **Dynamic UI:** The button bar is centered, scalable, and movable. It grows and shrinks dynamically based on how many alerts are active.
+    * **Self-Buffs:** Left-click to auto-cast missing buffs (e.g., *Battle Shout*, *Righteous Fury*, *Bear Form*).
+    * **Consumables:** Left-click missing Food/Elixirs to instantly open your bags.
+    * **Group Requests:** Left-click missing raid buffs (e.g., *Fortitude*) to send a polite request to chat with **clickable spell links**.
 
 ## Installation
 
@@ -38,29 +40,23 @@
 ## Configuration
 
 Type `/taudit` to open the configuration panel.
+* **Consumable Mode:** Choose between tracking Food Only, Elixirs, or Flasks.
 * **Button Scale:** Resize the UI to fit your screen.
 * **Position:** Move the bar using X/Y coordinates.
-* **Test Mode:** Shows dummy buttons so you can configure the layout.
-* **Toggles:** Enable/Disable checks for Food, Healthstones, or specific buff categories.
+* **Paladin Priority:** Drag and drop blessings to set your preferred request order.
 
 ## Tracked Buffs & Mechanics
 
 TankAudit scans your character, your inventory, and your group roster to determine exactly what you need.
 
 ### Class Abilities
-The addon automatically detects your class and tracks essential tanking mechanics:
-* **Self Buffs & Stances:** Alerts for missing maintenance buffs (*Righteous Fury*, *Lightning Shield*) or wrong Stance/Form (*Defensive Stance*, *Bear Form*).
-* **Group Utility:** Monitors buffs provided by party members (*Fortitude*, *Mark of the Wild*, *Blessings*) and allows one-click requests.
-* **Smart Filtering:**
-    * Automatically hides alerts for buffs you cannot receive.
-    * Intelligently detects if a Protection Paladin is present by watching for *Blessing of Sanctuary* on teammates.
-    * **Dispel Rules:** Knows that a Level 20 Paladin cannot yet cast *Cleanse*, preventing false alerts for Magic debuffs in low-level dungeons.
+* **Warrior:** Battle Shout, Defensive Stance.
+* **Druid:** Mark of the Wild, Thorns, Bear Form.
+* **Paladin:** Righteous Fury, Paladin Auras (Devotion or Retribution), Blessings (Kings, Might, Light, Sanctuary). *Supports Greater Blessings.*
+* **Shaman:** Lightning Shield, Rockbiter Weapon.
+* **Priest/Mage:** Fortitude, Spirit, Intellect.
 
-### General / Consumables
-* **Food:** Checks for "Well Fed" status (suppressed when solo) and warns when < 60s remains.
-* **Weapon Buffs:** Checks for Sharpening Stones / Wizard Oils / Rockbiter (suppressed when solo) and warns when < 60s remains.
-* **Healthstone:** Checks your bags if a Warlock is present in the group/raid.
-
-## Tips
-* **Leveling Friendly:** The addon checks your spellbook (by Icon) before alerting. It won't yell at a low-level Druid for missing *Bear Form* if you haven't visited the trainer yet.
-* **Low Friction:** The UI is designed to be invisible when you are doing your job correctly. If the screen is empty, you are ready to pull.
+### Smart Filtering
+* **Solo Mode:** Intelligently suppresses "hardcore" requirements (like Weapon Oils or Food) when you are playing solo.
+* **Role Detection:** Detects if a Protection Paladin is present (by watching for *Blessing of Sanctuary*) to avoid asking Holy Paladins for tank buffs.
+* **Level Awareness:** Knows that a Level 20 Paladin cannot yet cast *Cleanse*, preventing false alerts for Magic debuffs in low-level dungeons.

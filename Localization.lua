@@ -8,42 +8,50 @@ TA_STRINGS = {
     PALADIN = "Paladin",
     SHAMAN = "Shaman",
     
-    -- Standard Messages
     MSG_NEED_BUFF = "I need %s!",
     MSG_BUFF_EXPIRING = "I need %s - expiring in %s!",
     MSG_NEED_DISPEL = "I have %s (%s) - Dispel me please!",
     MSG_NEED_HS = "I need a Healthstone please!",
+    -- NEW: Tooltip for canceling
+    MSG_REMOVE_BUFF = "Click to Cancel Buff",
     
-    -- Local Alerts (Self-Reminders)
+    MSG_EXPIRING_SUFFIX = " (fading in %s)",
+    MSG_THANK_YOU = {
+        "Thanks for the %s, %s!",
+        "Much appreciated, %s.",
+        "Got the %s, thank you %s!"
+    },
+    
     MSG_LOCAL_FOOD = "|cFFFF0000[Audit]|r You need to eat! Check your bags.",
     MSG_LOCAL_WEAPON = "|cFFFF0000[Audit]|r Your weapon needs a Sharpening Stone/Oil!",
+    MSG_LOCAL_ELIXIR = "|cFFFF0000[Audit]|r You need an Elixir! Check your bags.",
+    MSG_LOCAL_FLASK = "|cFFFF0000[Audit]|r You need a Flask! Check your bags.",
     MSG_WAIT_THROTTLE = "|cFFFF0000[Audit]|r Wait before asking again.",
 }
 
 -- RP FLAVOR MESSAGES
--- %s will be replaced by the clickable Spell Link
 TA_RP_MESSAGES = {
     -- PRIEST
     ["Power Word: Fortitude"] = {
-        "Priest, I require %s!",
+        "Priest, could you bolster my health with %s?",
         "My shield is strong, but my health is low. %s please!",
-        "Fortify me, Priest! I need %s!"
+        "Fortify me, Priest! I could use %s."
     },
     ["Divine Spirit"] = {
         "I need the guidance of the %s.",
-        "Priest, grant me your Spirit! %s please!",
+        "Priest, if you can spare the mana, %s please!",
         "My spirit is willing, but the buff is missing. %s please."
     },
 
     -- DRUID
     ["Mark of the Wild"] = {
-        "Druid, grant me the %s!",
+        "Druid, grant me the %s if you can!",
         "The spirits whisper... I need %s!",
         "My fur needs thickening. %s please!"
     },
     ["Thorns"] = {
-        "Druid, cover me in %s!",
-        "I need %s to make them pay for striking me!",
+        "Druid, a layer of %s would help with threat.",
+        "I could use %s to make them pay for striking me!",
         "Let them bleed when they strike. %s please!"
     },
 
@@ -65,7 +73,7 @@ TA_RP_MESSAGES = {
     ["Blessing of Kings"] = {
         "Paladin, grant me the majesty of %s!",
         "A tank is nothing without his crown. %s please!",
-        "By the Light, I require %s!"
+        "A touch of royalty would help, Paladin. %s please!"
     },
     ["Blessing of Might"] = {
         "Paladin, grant me the strength to crush my foes! %s!",
@@ -87,15 +95,16 @@ TA_RP_MESSAGES = {
         "Let the healers' light shine brighter on me! %s!",
         "I need the holy light to mend me faster. %s please!"
     },
-    ["Devotion Aura"] = {
-        "Paladin, I need your %s for armor!",
-        "My armor is paper! %s please!",
-        "Protect us with your %s!"
+    -- UPDATED KEY
+    ["Paladin Aura"] = {
+        "Paladin, I need an Aura (%s)!",
+        "My armor/threat needs boosting! %s please!",
+        "We are missing an Aura, Paladin! (%s)"
     },
 
     -- FALLBACK
     ["DEFAULT"] = {
-        "I need %s!",
+        "I could use %s!",
         "Can I get %s please?",
         "Buff %s please!"
     }

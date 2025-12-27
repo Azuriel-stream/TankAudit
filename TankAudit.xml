@@ -71,7 +71,7 @@
 
     <Frame name="TankAudit_ConfigFrame" toplevel="true" movable="true" enableMouse="true" hidden="true" parent="UIParent">
         <Size>
-            <AbsDimension x="300" y="520"/>
+            <AbsDimension x="300" y="550"/>
         </Size>
         <Anchors>
             <Anchor point="CENTER"/>
@@ -125,10 +125,18 @@
 
             <CheckButton name="TankAudit_CheckFood" inherits="OptionsCheckButtonTemplate">
                 <Scripts>
-                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Consumables (Food/Weapon)");</OnLoad>
+                    <OnLoad>getglobal(this:GetName().."Text"):SetText("Track Consumables");</OnLoad>
                     <OnClick>TankAuditDB.checkFood = this:GetChecked();</OnClick>
                 </Scripts>
             </CheckButton>
+            
+            <Frame name="TankAudit_ConsumableDropdown" inherits="UIDropDownMenuTemplate">
+                <Anchors>
+                    <Anchor point="TOPLEFT" relativeTo="TankAudit_CheckFood" relativePoint="BOTTOMLEFT">
+                        <Offset><AbsDimension x="-10" y="-5"/></Offset>
+                    </Anchor>
+                </Anchors>
+            </Frame>
 
             <CheckButton name="TankAudit_CheckBuffs" inherits="OptionsCheckButtonTemplate">
                 <Scripts>
