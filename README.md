@@ -6,7 +6,7 @@
 
 * **Smart Context Awareness:** The auditing bar automatically hides when you are playing solo and out of combat to keep your interface clean. It instantly wakes up when you target an enemy, enter combat, or join a group.
 
-* **Context-Aware Gratitude (v1.4.0):**
+* **Context-Aware Gratitude (v1.4.1):**
     * When you request a buff (e.g., *Kings*) and receive it shortly after, your character will automatically thank the specific player who cast it in chat (e.g., *"Thanks for the [Blessing of Kings], PaladinBob!"*).
 
 * **Consumable Tracking Modes:**

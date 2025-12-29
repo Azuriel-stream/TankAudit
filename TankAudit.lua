@@ -1,7 +1,7 @@
 -- TankAudit.lua
 
 -- 1. Constants & Variables
-local TA_VERSION = "1.4.0" 
+local TA_VERSION = "1.4.1" 
 local TA_PLAYER_CLASS = nil
 local TA_IS_TANK = false
 
@@ -28,7 +28,7 @@ local TA_BUTTON_SPACING = 2
 local TA_FRAME_ANCHOR = "CENTER" 
 local TA_TooltipScanner = nil
 
--- Request Tracking (For Thank You messages)
+-- Request Tracking
 local TA_LAST_REQUEST = {
     buffName = nil,
     timestamp = 0
@@ -112,23 +112,18 @@ function TankAudit_OnLoad()
         TA_IS_TANK = false
     end
 
+    -- Always register variables loaded, even if not a tank, to safely init DB structure
+    this:RegisterEvent("VARIABLES_LOADED")
+
     if not TA_IS_TANK then return end
 
+    -- TANKALERT PATTERN: Only register the entry point event here
     this:RegisterEvent("PLAYER_ENTERING_WORLD")
-    this:RegisterEvent("PLAYER_REGEN_DISABLED")
-    this:RegisterEvent("PLAYER_REGEN_ENABLED")
-    this:RegisterEvent("LEARNED_SPELL_IN_TAB")
-
-    this:RegisterEvent("UNIT_AURA")
-    this:RegisterEvent("UNIT_INVENTORY_CHANGED")
-    this:RegisterEvent("PLAYER_TARGET_CHANGED")
     
     TankAudit_CreateButtonPool()
 
     -- Initialize Dropdown menu
     UIDropDownMenu_Initialize(TankAudit_ConsumableDropdown, TankAudit_ConsumableDropdown_Initialize)
-
-    DEFAULT_CHAT_FRAME:AddMessage(_strformat(TA_STRINGS.LOADED, TA_VERSION))
 end
 
 -- 4. Slash Command Handler
@@ -151,11 +146,33 @@ end
 
 -- 5. Event Handling
 function TankAudit_OnEvent(event)
-    if not TA_IS_TANK then return end
-
-    if event == "PLAYER_ENTERING_WORLD" then
+    if event == "VARIABLES_LOADED" then
+        -- 1. Initialize Database early to prevent UI nil errors
         TankAudit_InitializeDefaults()
+        
+    elseif not TA_IS_TANK then 
+        return 
+    end
+
+    -- TANKALERT PATTERN: Initialization Sequence
+    if event == "PLAYER_ENTERING_WORLD" then
+        -- 2. Cache Spells
         TankAudit_CacheSpells()
+        
+        -- 3. Register Operational Events (Now safe because DB is loaded)
+        this:RegisterEvent("PLAYER_REGEN_DISABLED")
+        this:RegisterEvent("PLAYER_REGEN_ENABLED")
+        this:RegisterEvent("LEARNED_SPELL_IN_TAB")
+        this:RegisterEvent("UNIT_AURA")
+        this:RegisterEvent("UNIT_INVENTORY_CHANGED")
+        this:RegisterEvent("PLAYER_TARGET_CHANGED")
+        
+        -- 4. Announce Load
+        DEFAULT_CHAT_FRAME:AddMessage(_strformat(TA_STRINGS.LOADED, TA_VERSION))
+        
+        -- 5. Unregister Init Event (Run once)
+        this:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        this:UnregisterEvent("VARIABLES_LOADED")
         
     elseif event == "LEARNED_SPELL_IN_TAB" then
         TankAudit_CacheSpells()
@@ -179,6 +196,8 @@ end
 
 -- 6. The Timer Loop (OnUpdate)
 function TankAudit_OnUpdate(elapsed)
+    if not TankAuditDB then return end
+
     if not TA_IS_TANK then 
         this:SetScript("OnUpdate", nil) 
         return 
@@ -531,6 +550,8 @@ end
 
 -- Main audit routine
 function TankAudit_RunBuffScan()
+    if not TankAuditDB then return end
+    
     if not TankAuditDB.enabled then
         TankAudit_UpdateUI()
         return
@@ -770,6 +791,8 @@ function TankAudit_MovePriority(index, direction)
 end
 
 function TankAudit_UpdateUI()
+    if not TankAuditDB then return end
+    
     local scale = TankAuditDB.scale or 1.0
     local btnSize = TA_BUTTON_SIZE
     local spacing = TA_BUTTON_SPACING
@@ -1133,6 +1156,9 @@ function TankAudit_ConsumableDropdown_OnClick()
 end
 
 function TankAudit_ConsumableDropdown_Initialize()
+    -- CRITICAL FIX: Prevent crash if accessed before SavedVars are loaded
+    if not TankAuditDB then return end
+
     local info = {}
     
     info.text = "Food Only"
@@ -1151,9 +1177,31 @@ function TankAudit_ConsumableDropdown_Initialize()
     UIDropDownMenu_AddButton(info)
 end
 
+-- This helper handles Slider updates safely in Lua
+function TankAudit_Slider_OnValueChanged(slider)
+    if not slider then return end
+    local val = slider:GetValue()
+    
+    -- 1. Update Database & Visuals (only if DB is loaded)
+    if TankAuditDB then
+        TankAuditDB.scale = val
+        TankAudit_UpdateUI()
+    end
+    
+    -- 2. Update Label using localized string format
+    -- Uses _strformat defined at top of file, avoiding global string.format usage
+    local label = getglobal(slider:GetName().."Text")
+    if label then
+        label:SetText(_strformat("Button Scale: %.1f", val))
+    end
+end
+
 function TankAudit_Config_OnShow(frame)
     if not frame then frame = getglobal("TankAudit_ConfigFrame") end
     if not frame then return end
+    
+    -- Safety Check: Stop if DB isn't loaded yet
+    if not TankAuditDB then return end
     
     local chkEnable = getglobal("TankAudit_CheckEnable")
     if chkEnable then chkEnable:SetChecked(TankAuditDB.enabled) end
