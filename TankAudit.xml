@@ -175,14 +175,7 @@
                         this:SetValueStep(0.1);
                     </OnLoad>
                     <OnValueChanged>
-                        -- Update the Database
-                        TankAuditDB.scale = this:GetValue();
-                        
-                        -- Update the Visuals (Size)
-                        TankAudit_UpdateUI();
-                        
-                        -- NEW: Update the Label to show the number (e.g. "Button Scale: 1.2")
-                        getglobal(this:GetName().."Text"):SetText(string.format("Button Scale: %.1f", this:GetValue()));
+                        TankAudit_Slider_OnValueChanged(this);
                     </OnValueChanged>
                 </Scripts>
             </Slider>
